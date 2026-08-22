@@ -1,0 +1,30 @@
+3. DNSSEC Chain
+
+crypto-lab-dnssec-chain · PROTOCOLS
+
+Thesis. A second trust hierarchy, unrelated to X.509, whose denial-of-existence proofs hand out the zone.
+
+Construction. Real records: DNSKEY (ZSK + KSK), DS (digest of the KSK), RRSIG over RRsets with inception/expiration windows, NSEC/NSEC3 for authenticated denial. Algorithms 13 (ECDSAP256SHA256) and 15 (Ed25519), both available via WebCrypto and @noble/ed25519. Validate a full chain: root → TLD → zone.
+
+Acts
+Build the chain. Root trust anchor → DS at the parent → DNSKEY at the child → RRSIG over the answer. Each link verified as its own step.
+Break each link. Corrupt the DS digest, expire an RRSIG, skew the clock past inception (pairs with Time Trust), mismatch the key tag, sign with an unsupported algorithm. Each produces its own named failure, never a generic "invalid."
+Delegation without DS. An unsigned child under a signed parent returns INSECURE, not BOGUS. The distinction matters and is routinely misunderstood.
+NSEC zone walking — the climax. NSEC proves a name doesn't exist by naming the next name that does. Chain the queries and enumerate the whole zone in a dozen clicks. This one is unconditional: NSEC permits traditional walking by construction.
+NSEC3 — conditional, not automatic. Hashing the names moves enumeration offline rather than eliminating it. Run a dictionary attack against the hashes on the same zone twice: once with guessable labels (dictionary words, common prefixes, short strings), where much of the zone falls out, and once with high-entropy labels, where it doesn't. Report recovery rate, not a verdict. The lesson, stated in the direction that is actually true: NSEC3 replaces trivial walking with an offline guessing problem — predictable labels remain recoverable despite added iterations, and sufficiently unpredictable labels do not. Revision 3 had this inverted in the summary while the act itself was right, which is why the summary now states the direction explicitly.
+Online minimally covering denial. NSEC black lies and NSEC3 white lies: instead of publishing a precomputed chain that represents the zone, synthesize a narrowly covering denial proof per query, making systematic enumeration impractical. Not the only defense and not free — it requires online signing keys, which is its own tradeoff and belongs in THREAT-MODEL.md.
+Rollover. ZSK rollover by double-signature and pre-publish, and the failure where a resolver's cached DS outlives the key it points at.
+
+Negative claim (NEG-1). DNSSEC provides origin authentication and integrity, never confidentiality. Queries and answers travel in the clear whether or not they validate. This is why DoH/DoT exist.
+
+Do not claim ECH depends on this chain. RFC 9849 (Standards Track, March 2026) states that ECH supports delivery of configurations via SVCB or HTTPS records without requiring verifiable authenticity or provenance, and treats DNSSEC as one defense against DNS tampering with encrypted DNS transport as another. The honest cross-link to Blind Hello is that DNSSEC is an available protection for the ECHConfig, not its source of authenticity.
+
+Failure codes. DS_MISMATCH · RRSIG_EXPIRED · RRSIG_NOT_YET_VALID · KEYTAG_MISMATCH · ALG_UNSUPPORTED · NSEC_PROOF_INVALID · BOGUS · INSECURE
+
+Citations — correcting the review. The technical review cited RFC 8901 for enumeration defenses. That is the wrong document — 8901 is multi-signer DNSSEC models and says nothing useful here. The correct anchors are RFC 5155 (NSEC3), RFC 4470 (minimally covering NSEC records and DNSSEC on-line signing — the actual white-lies/black-lies reference), and RFC 7129 (informational, authenticated denial of existence). Verify each against its own abstract before it enters PRIOR-ART.md; the citation rule applies to corrections as much as to originals.
+
+Vectors. RFC 4034/5155 examples plus a pinned real-world chain captured at a fixed timestamp. Commit the captured RRsets; never fetch at runtime.
+
+Repo description.
+
+Browser demo: a full DNSSEC chain from root trust anchor to RRSIG, then NSEC's denial-of-existence proof walked to enumerate the entire zone — and NSEC3 turning that walk into an offline guessing problem that predictable labels still lose.
