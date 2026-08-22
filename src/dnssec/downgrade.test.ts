@@ -17,8 +17,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { fromHex, toBase32Hex } from '../dns/codec.ts';
-import { parseName, presentName } from '../dns/name.ts';
-import { encodeDs, encodeNsec, encodeNsec3, encodeDnskey } from '../dns/rdata.ts';
+import { compareNames, parseName, presentName } from '../dns/name.ts';
+import { encodeDs, encodeNsec, encodeNsec3, encodeDnskey, parseRdata } from '../dns/rdata.ts';
 import { CLASS_IN, DIGEST_TYPE, RR_TYPE, type RRset } from '../dns/types.ts';
 import { COLLIDING_TAG_SEEDS } from '../vectors/demo-keys.ts';
 import { buildDemoZone, buildHierarchy, DEMO_NOW, TLD, UNSIGNED_CHILD, ZONE } from '../zone/demo.ts';
@@ -28,7 +28,7 @@ import { dsPreimage } from './canonical.ts';
 import { validateChain } from './chain.ts';
 import { digest, importPinnedEd25519Key } from './crypto.ts';
 import { keyTag } from './keytag.ts';
-import { proveNxdomain, toNsecRecord } from './nsec.ts';
+import { nsecCovers, proveNoData, proveNsecNoDs, proveNxdomain, toNsecRecord } from './nsec.ts';
 import { nsec3Hash, proveNsec3NoDs, toNsec3Record } from './nsec3.ts';
 
 const ROOT = parseName('.');
@@ -149,6 +149,89 @@ describe('a denial only speaks for its own zone', () => {
     const zone = await buildDemoZone();
     const response = queryZone(zone, parseName('www.google.com.'), RR_TYPE.A);
     expect(checkDenial(zone, response)?.proven).toBe(false);
+  });
+
+  it('refuses a FOREIGN record that would otherwise prove NODATA', async () => {
+    // The sharp version of the bailiwick rule. Feeding this zone's validator a
+    // record from somebody else's zone that matches the queried name PERFECTLY
+    // -- right owner, right shape, and in the wild it would carry that zone's
+    // own valid signature -- must still fail, because `demo.example.` has no
+    // authority to say anything about a name under `google.com.`. Every other
+    // check in `proveNoData` passes here; the bailiwick test is the only thing
+    // standing in the way.
+    const foreign = toNsecRecord(
+      parseName('www.google.com.'),
+      parseRdata(RR_TYPE.NSEC, 'x.google.com. AAAA RRSIG NSEC')
+    );
+    const proof = proveNoData([foreign], parseName('www.google.com.'), RR_TYPE.A, ZONE);
+    expect(proof.proven).toBe(false);
+    expect(proof.steps[0]?.label).toBe('Query is inside this zone');
+    expect(proof.steps[0]?.passed).toBe(false);
+    // Nothing after the bailiwick step may have run: a validator that keeps
+    // going has already read a record it had no business reading.
+    expect(proof.steps).toHaveLength(1);
+
+    // The same record IS a valid NODATA proof for the zone it belongs to.
+    const atHome = proveNoData(
+      [foreign],
+      parseName('www.google.com.'),
+      RR_TYPE.A,
+      parseName('google.com.')
+    );
+    expect(atHome.proven).toBe(true);
+  });
+
+  it('refuses a FOREIGN record that would otherwise prove a delegation unsigned', async () => {
+    // Same shape, worse consequence: a validator that accepted this would let
+    // anyone downgrade any delegation to INSECURE by producing a record from a
+    // zone they do control.
+    const foreign = toNsecRecord(
+      parseName('sub.google.com.'),
+      parseRdata(RR_TYPE.NSEC, 'x.google.com. NS RRSIG NSEC')
+    );
+    const proof = proveNsecNoDs([foreign], parseName('sub.google.com.'), ZONE);
+    expect(proof.proven).toBe(false);
+    expect(proof.steps[0]?.label).toBe('Query is inside this zone');
+    expect(proof.steps[0]?.passed).toBe(false);
+    expect(proof.steps).toHaveLength(1);
+
+    const atHome = proveNsecNoDs([foreign], parseName('sub.google.com.'), parseName('google.com.'));
+    expect(atHome.proven).toBe(true);
+  });
+
+  it('covers a name past the END of the zone only through the wrapping record', async () => {
+    // The last NSEC in a chain has its next name pointing back at the apex, so
+    // its interval wraps around the end of the ordering. Every name sorting
+    // after the last owner is covered by that one record and by nothing else,
+    // which makes the wrap branch the only path to a denial for those names —
+    // and getting it wrong is the classic NSEC validator bug: either the tail
+    // of the zone becomes undeniable, or a forged NXDOMAIN is accepted.
+    const zone = await buildDemoZone();
+    const records = zone.denialRecords
+      .filter((r) => r.rrset.type === RR_TYPE.NSEC)
+      .flatMap((r) => r.rrset.rdatas.map((rdata) => toNsecRecord(r.rrset.name, rdata)));
+
+    // Confirm the premise rather than assuming it: exactly one record wraps.
+    const wrapping = records.filter(
+      (r) => compareNames(r.rdata.nextName, r.owner) <= 0
+    );
+    expect(wrapping).toHaveLength(1);
+    expect(presentName(wrapping[0]!.rdata.nextName)).toBe(presentName(ZONE));
+
+    // `zzzz…` sorts after every label in this zone, so only the wrap can cover it.
+    const past = parseName('zzzz-past-the-end.demo.example.');
+    expect(records.filter((r) => nsecCovers(r, past))).toHaveLength(1);
+    expect(nsecCovers(wrapping[0]!, past)).toBe(true);
+    expect(proveNxdomain(records, past, ZONE).proven).toBe(true);
+
+    // And the whole server path agrees.
+    const response = queryZone(zone, past, RR_TYPE.A);
+    expect(response.rcode).toBe('NXDOMAIN');
+    expect(checkDenial(zone, response)?.proven).toBe(true);
+
+    // The wrap must not become a licence to cover EVERYTHING: a name that
+    // exists is still not deniable.
+    expect(nsecCovers(wrapping[0]!, parseName('www.demo.example.'))).toBe(false);
   });
 });
 
