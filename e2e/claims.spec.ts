@@ -43,6 +43,16 @@ async function settled(page: Page, selector: string, attribute: string): Promise
   await expect(page.locator(selector)).not.toHaveAttribute(attribute, 'pending');
 }
 
+/**
+ * The dictionary run passes through `running` on its way to `complete`, so
+ * "not pending" is NOT the same as "finished" — reading the counters at that
+ * moment gets a mid-run snapshot, which is how a comparison between two runs
+ * comes to compare one finished run against half of another.
+ */
+async function dictionaryFinished(page: Page): Promise<void> {
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
+}
+
 // ── The headline claim, re-derived from the rendered transcript ────────────
 
 test('the walk transcript links up: every row starts where the previous one pointed', async ({
@@ -254,8 +264,7 @@ test('INSECURE carries no failure code; the same delegation without a proof is B
 test('the recovery rate, the chips and the hash count all agree', async ({ page }) => {
   await boot(page);
   await openTab(page, 'NSEC3 guessing');
-  await settled(page, '#nsec3-out', 'data-state');
-  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
+  await dictionaryFinished(page);
 
   const read = async (key: string): Promise<number> =>
     Number(await page.locator('#nsec3-out').getAttribute(`data-${key}`));
@@ -275,8 +284,11 @@ test('the recovery rate, the chips and the hash count all agree', async ({ page 
   );
   expect(meterValue).toBe(rate);
   // The chips are the fourth: one per recovered name, one per missed name.
-  await expect(page.locator('#nsec3-out .chip-found')).toHaveCount(recovered);
-  await expect(page.locator('#nsec3-out .chip-safe')).toHaveCount(zoneNames - recovered);
+  // Scoped to `ul.chips` because the legend above the list uses the same two
+  // classes to show what each colour means — counting it would be an off-by-one
+  // in both directions.
+  await expect(page.locator('#nsec3-out ul.chips .chip-found')).toHaveCount(recovered);
+  await expect(page.locator('#nsec3-out ul.chips .chip-safe')).toHaveCount(zoneNames - recovered);
 
   // Every hash is accounted for: one per candidate, times iterations + 1.
   expect(hashOps).toBe(candidates * (iterations + 1));
@@ -285,7 +297,9 @@ test('the recovery rate, the chips and the hash count all agree', async ({ page 
   // it, and what survives is named on screen rather than merely counted.
   expect(rate).toBeGreaterThan(70);
   expect(rate).toBeLessThan(100);
-  const survivors = await page.locator('#nsec3-out .chip-safe').allTextContents();
+  const survivors = await page
+    .locator('#nsec3-out ul.chips .chip-safe .chip-name')
+    .allTextContents();
   expect(survivors.length).toBeGreaterThan(0);
   for (const survivor of survivors) expect(survivor).toMatch(/\.demo\.example\.$/);
 });
@@ -293,14 +307,14 @@ test('the recovery rate, the chips and the hash count all agree', async ({ page 
 test('adding 150 iterations changes the cost and not the recovered set', async ({ page }) => {
   await boot(page);
   await openTab(page, 'NSEC3 guessing');
-  await settled(page, '#nsec3-out', 'data-state');
-  const before = await page.locator('#nsec3-out .chip-found').allTextContents();
+  await dictionaryFinished(page);
+  const before = await page.locator('#nsec3-out ul.chips .chip-found .chip-name').allTextContents();
   const hashesBefore = Number(await page.locator('#nsec3-out').getAttribute('data-hashops'));
 
   await page.locator('#panel-nsec3').getByRole('button', { name: '150', exact: true }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await dictionaryFinished(page);
   await expect(page.locator('#nsec3-out')).toHaveAttribute('data-iterations', '150');
-  const after = await page.locator('#nsec3-out .chip-found').allTextContents();
+  const after = await page.locator('#nsec3-out ul.chips .chip-found .chip-name').allTextContents();
   const hashesAfter = Number(await page.locator('#nsec3-out').getAttribute('data-hashops'));
 
   // Identical outcome...
@@ -312,11 +326,11 @@ test('adding 150 iterations changes the cost and not the recovered set', async (
 test('high-entropy labels recover nothing, and the page says why', async ({ page }) => {
   await boot(page);
   await openTab(page, 'NSEC3 guessing');
-  await settled(page, '#nsec3-out', 'data-state');
+  await dictionaryFinished(page);
   await page.locator('#panel-nsec3').getByRole('button', { name: /Unguessable names/ }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await dictionaryFinished(page);
   await expect(page.locator('#nsec3-out')).toHaveAttribute('data-rate', '0');
-  await expect(page.locator('#nsec3-out .chip-found')).toHaveCount(0);
+  await expect(page.locator('#nsec3-out ul.chips .chip-found')).toHaveCount(0);
   // The conclusion must be about the NAMES, not a verdict on NSEC3.
   await expect(page.locator('#nsec3-out')).toContainText('a statement about the names, not about NSEC3');
 });

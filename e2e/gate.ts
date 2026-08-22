@@ -870,14 +870,17 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('NSEC3: high-entropy labels — nothing recovered, the empty meter');
 
   await page.locator('#panel-nsec3').getByRole('button', { name: /^Ordinary names/ }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
   await page.locator('#panel-nsec3').getByRole('button', { name: '150', exact: true }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
   await expect(page.locator('#nsec3-out')).toHaveAttribute('data-iterations', '150');
   await scanAt('NSEC3: 150 extra iterations — same recovery, 151x the work');
 
   await page.locator('#panel-nsec3').getByRole('button', { name: '8-byte salt' }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  // `data-state` passes through `running`, so wait for `complete` rather than
+  // merely for "not pending" -- a scan taken mid-run measures a half-drawn
+  // chip list and a meter that is still moving.
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
   await scanAt('NSEC3: salted — the trace and the rate both re-rendered');
 
   // One intermediate iteration count and the no-salt control, so every button
@@ -885,10 +888,10 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   // 150 with different numbers, so only one of the three is scanned; that is a
   // deliberate cap and it is stated here rather than left silent.
   await page.locator('#panel-nsec3').getByRole('button', { name: '10', exact: true }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
   await expect(page.locator('#nsec3-out')).toHaveAttribute('data-iterations', '10');
   await page.locator('#panel-nsec3').getByRole('button', { name: /no salt/ }).click();
-  await settled(page, '#nsec3-out', 'data-state');
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-state', 'complete');
   await scanAt('NSEC3: 10 iterations, salt removed again — every control in this panel driven');
 
   for (const summary of ['iterations and salt do not change', 'stated in the direction that is true']) {
