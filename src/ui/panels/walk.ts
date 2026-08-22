@@ -192,7 +192,22 @@ export function renderWalkPanel(host: HTMLElement): void {
   };
 
   const reset = async (): Promise<void> => {
-    zone = await buildDemoZone({ labels });
+    // Signing takes a moment, and every control below is inert until it
+    // finishes. Say so rather than letting a press do nothing silently.
+    output.dataset.complete = 'pending';
+    replace(output, el('p', { class: 'prose', text: 'Signing the zone…' }));
+    try {
+      zone = await buildDemoZone({ labels });
+    } catch (error) {
+      output.dataset.complete = 'error';
+      replace(
+        output,
+        el('div', { class: 'callout callout-danger' }, [
+          el('p', { text: `Could not sign the zone: ${(error as Error).message}` }),
+        ])
+      );
+      return;
+    }
     state = startWalk(zone);
     draw();
   };
@@ -297,7 +312,7 @@ function forgeSection(getZone: () => SignedZone | null): HTMLElement {
         const record = toNsecRecord(first.rrset.name, rdata);
         // A name deliberately outside this record's interval.
         const target: Labels = [new TextEncoder().encode('zzzz-not-covered'), ...zone.spec.apex];
-        const proof = proveNxdomain([record], target);
+        const proof = proveNxdomain([record], target, zone.spec.apex);
         replace(
           out,
           el('div', { class: 'reveal' }, [

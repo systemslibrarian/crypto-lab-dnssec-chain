@@ -26,8 +26,8 @@
  * `iterations` counts the ADDITIONAL hashes — so the total is iterations + 1.
  */
 
-import { compareBytes, concatBytes, toBase32Hex } from '../dns/codec.ts';
-import { canonicalWire, presentName, type Labels } from '../dns/name.ts';
+import { compareBytes, concatBytes } from '../dns/codec.ts';
+import { canonicalWire, isAtOrBelow, presentName, type Labels } from '../dns/name.ts';
 import { decodeNsec3, type Nsec3Rdata } from '../dns/rdata.ts';
 import { RR_TYPE, typeName } from '../dns/types.ts';
 import { nsec3Digest } from './crypto.ts';
@@ -49,11 +49,6 @@ export function nsec3Hash(name: Labels, params: Nsec3Params): Uint8Array {
     current = nsec3Digest(params.hashAlgorithm, concatBytes(current, params.salt));
   }
   return current;
-}
-
-/** The hashed owner name as it appears in the zone: base32hex, lowercased. */
-export function nsec3OwnerLabel(name: Labels, params: Nsec3Params): string {
-  return toBase32Hex(nsec3Hash(name, params)).toLowerCase();
 }
 
 /**
@@ -138,6 +133,24 @@ export interface Nsec3Denial {
 }
 
 /**
+ * The NSEC3 half of the bailiwick rule. See `inBailiwick` in `nsec.ts` for why
+ * this is a hole rather than a formality: the hash ring wraps too, so its last
+ * record covers every hash after the last owner's, and hashes do not carry any
+ * hint of which zone they came from.
+ */
+function inBailiwick3(steps: Nsec3DenialStep[], name: Labels, zone: Labels): boolean {
+  const inside = isAtOrBelow(name, zone);
+  steps.push({
+    label: 'Query is inside this zone',
+    passed: inside,
+    detail: inside
+      ? `${presentName(name)} is at or below ${presentName(zone)}, so this zone's records can speak about it`
+      : `${presentName(name)} is outside ${presentName(zone)} — no record from this zone can deny it`,
+  });
+  return inside;
+}
+
+/**
  * The closest-encloser proof (RFC 5155 section 8.3).
  *
  * NSEC3 cannot name the closest encloser directly — the record only carries a
@@ -157,6 +170,7 @@ export function proveNsec3Nxdomain(
   params: Nsec3Params
 ): Nsec3Denial {
   const steps: Nsec3DenialStep[] = [];
+  if (!inBailiwick3(steps, name, zone)) return { proven: false, steps, optOut: false };
   const mismatched = records.filter((r) => !paramsMatch(paramsOf(r), params));
   if (mismatched.length > 0) {
     steps.push({
@@ -252,9 +266,11 @@ export function proveNsec3NoData(
   records: readonly Nsec3Record[],
   name: Labels,
   type: number,
-  params: Nsec3Params
+  params: Nsec3Params,
+  zone: Labels
 ): Nsec3Denial {
   const steps: Nsec3DenialStep[] = [];
+  if (!inBailiwick3(steps, name, zone)) return { proven: false, steps, optOut: false };
   const hash = nsec3Hash(name, params);
   const match = records.find((r) => nsec3Matches(r, hash));
   if (!match) {
@@ -306,15 +322,43 @@ export function proveNsec3NoDs(
   params: Nsec3Params
 ): Nsec3Denial {
   const steps: Nsec3DenialStep[] = [];
+  if (!inBailiwick3(steps, delegation, zone)) return { proven: false, steps, optOut: false };
   const hash = nsec3Hash(delegation, params);
   const match = records.find((r) => nsec3Matches(r, hash));
   if (match) {
-    const hasDs = match.rdata.types.includes(RR_TYPE.DS);
+    // RFC 5155 section 8.9 imposes THREE conditions here, not one. The NS bit
+    // must be set, the DS bit must not be, and the SOA bit must not be either
+    // -- that last one is how the validator knows the record came from the
+    // PARENT side of the cut. Without it, a child's own apex NSEC3 (which
+    // carries SOA, NS and DNSKEY and never carries DS) would prove that the
+    // child's delegation is unsigned, and a signed zone could downgrade
+    // itself.
+    const types = match.rdata.types;
     steps.push({
       label: 'NSEC3 matching the delegation',
       passed: true,
-      detail: `an NSEC3 owner equals the hash of ${presentName(delegation)}, listing ${match.rdata.types.map(typeName).join(', ') || '(nothing)'}`,
+      detail: `an NSEC3 owner equals the hash of ${presentName(delegation)}, listing ${types.map(typeName).join(', ') || '(nothing)'}`,
     });
+
+    const hasNs = types.includes(RR_TYPE.NS);
+    steps.push({
+      label: 'NS present — this is a delegation',
+      passed: hasNs,
+      detail: hasNs
+        ? 'the bit map lists NS'
+        : 'the bit map has no NS, so this name is not a delegation point',
+    });
+
+    const hasSoa = types.includes(RR_TYPE.SOA);
+    steps.push({
+      label: 'SOA absent — the parent is speaking',
+      passed: !hasSoa,
+      detail: hasSoa
+        ? 'the bit map lists SOA, so this NSEC3 came from the CHILD apex — a zone cannot testify about its own DS'
+        : 'the bit map has no SOA, so this record was served by the parent side of the cut',
+    });
+
+    const hasDs = types.includes(RR_TYPE.DS);
     steps.push({
       label: 'DS absent from the bit map',
       passed: !hasDs,
@@ -322,7 +366,7 @@ export function proveNsec3NoDs(
         ? 'the bit map DOES list DS, so this record cannot prove the delegation is unsigned'
         : 'DS is absent from the bit map, so the parent is signing that it holds no DS for this child',
     });
-    return { proven: !hasDs, steps, optOut: isOptOut(match) };
+    return { proven: hasNs && !hasSoa && !hasDs, steps, optOut: isOptOut(match) };
   }
 
   steps.push({

@@ -22,6 +22,7 @@
  * ignore real failures.
  */
 
+import { compareBytes } from '../dns/codec.ts';
 import { presentName, type Labels } from '../dns/name.ts';
 import { type RRset } from '../dns/types.ts';
 import type { FailureCode, SecurityStatus } from './failures.ts';
@@ -36,12 +37,34 @@ export interface AnchorDs {
   readonly rdata: Uint8Array;
 }
 
-/** Proof, from the parent, that a child has no DS — i.e. is unsigned. */
+/**
+ * Proof, from the parent, that a child has no DS — i.e. is unsigned.
+ *
+ * `rrsets` carries the denial RRsets WITH their signatures, and it is not
+ * optional. RFC 4035 section 5.2 makes authentication the precondition: "If
+ * the validator AUTHENTICATES an NSEC RRset that proves that no DS RRset is
+ * present for this zone, then there is no authentication path leading from the
+ * parent to the child." Accepting an unauthenticated denial would let anyone
+ * who can answer a query downgrade a signed zone to INSECURE simply by
+ * asserting that it has no DS — which is a strictly better attack than
+ * forging, because INSECURE answers are delivered to the client rather than
+ * refused.
+ */
+export interface DenialEvidenceRrset {
+  readonly rrset: RRset;
+  readonly rrsigs: readonly Uint8Array[];
+}
+
 export type NoDsProof =
-  | { readonly kind: 'nsec'; readonly records: readonly NsecRecord[] }
+  | {
+      readonly kind: 'nsec';
+      readonly records: readonly NsecRecord[];
+      readonly rrsets: readonly DenialEvidenceRrset[];
+    }
   | {
       readonly kind: 'nsec3';
       readonly records: readonly Nsec3Record[];
+      readonly rrsets: readonly DenialEvidenceRrset[];
       readonly params: Nsec3Params;
     };
 
@@ -199,7 +222,6 @@ async function validateLink(
   // ── The parent's half: either a DS, or a signed proof there is none ───────
   let vouchedKey: KeyInfo | null = null;
   let dsVerification: RrsetVerification | null = null;
-  let noDsProof: DenialProof | Nsec3Denial | null = null;
 
   if (isRoot) {
     // The root has no parent. Its keys are vouched for by the anchors the
@@ -238,17 +260,57 @@ async function validateLink(
       )
     );
   } else if (evidence.noDsProof) {
-    // The parent proved there is no DS. This is not a broken chain.
+    // The parent proved there is no DS. This is not a broken chain -- PROVIDED
+    // the proof is authenticated. Verify every denial RRset under the parent's
+    // keys FIRST; an unsigned or badly-signed denial is BOGUS, not INSECURE.
+    const denialCode = evidence.noDsProof.kind === 'nsec' ? 'NSEC_PROOF_INVALID' : 'NSEC3_PROOF_INVALID';
+    if (evidence.noDsProof.rrsets.length === 0) {
+      checks.push(
+        fail(
+          'no-ds-signature',
+          'Denial is signed',
+          'the no-DS proof arrived with no records at all, so there is nothing to authenticate',
+          denialCode
+        )
+      );
+      return stop(denialCode, 'BOGUS');
+    }
+    for (const evidenceRrset of evidence.noDsProof.rrsets) {
+      const denialVerification = await verifyRrset(
+        evidenceRrset.rrset,
+        evidenceRrset.rrsigs,
+        parentKeys,
+        { zone: parentZone, now: input.now }
+      );
+      if (!denialVerification.verified) {
+        checks.push(
+          fail(
+            'no-ds-signature',
+            'Denial is signed',
+            `the ${presentName(evidenceRrset.rrset.name)} denial record does not verify under ${presentName(parentZone)}'s keys, so it proves nothing`,
+            denialVerification.failure ?? denialCode
+          )
+        );
+        return stop(denialVerification.failure ?? denialCode, statusForFailure(denialVerification.failure));
+      }
+    }
+    checks.push(
+      pass(
+        'no-ds-signature',
+        'Denial is signed',
+        `${evidence.noDsProof.rrsets.length} denial record set${evidence.noDsProof.rrsets.length === 1 ? '' : 's'} verified under ${presentName(parentZone)}'s keys — the parent really is the one saying this`
+      )
+    );
+
     const proof =
       evidence.noDsProof.kind === 'nsec'
-        ? proveNsecNoDs(evidence.noDsProof.records, evidence.zone)
+        ? proveNsecNoDs(evidence.noDsProof.records, evidence.zone, parentZone)
         : proveNsec3NoDs(
             evidence.noDsProof.records,
             evidence.zone,
             parentZone,
             evidence.noDsProof.params
           );
-    noDsProof = proof;
     for (const step of proof.steps) {
       checks.push(
         step.passed
@@ -295,7 +357,6 @@ async function validateLink(
       zone: parentZone,
       now: input.now,
     });
-    checks.push(...dsVerification.attempts.flatMap((a) => a.checks).slice(0, 0));
     const deepest = dsVerification.attempts.reduce<Check[] | null>(
       (best, a) => (best === null || a.checks.length > best.length ? [...a.checks] : best),
       null
@@ -313,14 +374,21 @@ async function validateLink(
     }
 
     let matched: DsMatch | null = null;
-    let unsupportedOnly = true;
+    // RFC 6840 section 5.2 covers BOTH kinds of "this validator cannot use
+    // that": an unknown DS digest type and an unknown DNSKEY algorithm. Either
+    // way the DS is disregarded, and if every DS the parent published is
+    // disregarded then the delegation is UNSIGNED rather than broken. Treating
+    // it as broken would raise a forgery alarm over a zone that is perfectly
+    // correct and merely newer than this validator.
+    const UNUSABLE: readonly (FailureCode | null)[] = ['DIGEST_UNSUPPORTED', 'ALG_UNSUPPORTED'];
+    let unusableOnly = true;
     for (const rdata of evidence.ds.rdatas) {
       const result = matchDs(rdata, evidence.zone, evidence.dnskeys.rdatas);
       dsMatches.push(result);
-      if (result.failure !== 'DIGEST_UNSUPPORTED') unsupportedOnly = false;
+      if (!UNUSABLE.includes(result.failure)) unusableOnly = false;
       if (result.matched) {
         matched = result;
-        unsupportedOnly = false;
+        unusableOnly = false;
         break;
       }
     }
@@ -329,11 +397,22 @@ async function validateLink(
       for (const check of shown?.checks ?? []) {
         checks.push({ ...check, label: `DS digest — ${check.label}` });
       }
-      // RFC 6840 section 5.2: a DS whose digest algorithm the validator cannot
-      // compute must be treated exactly like no DS at all. If EVERY DS is like
-      // that, the delegation is unsigned rather than broken.
-      if (unsupportedOnly) return stop('DIGEST_UNSUPPORTED', 'INSECURE');
+      if (unusableOnly) return stop(shown?.failure ?? 'DIGEST_UNSUPPORTED', 'INSECURE');
       return stop(shown?.failure ?? 'DS_MISMATCH', 'BOGUS');
+    }
+    // The vouched key must be allowed to sign this zone's RRsets at all
+    // (RFC 4034 section 2.1.1). A DS pointing at a key with the Zone Key bit
+    // clear vouches for something that may not sign anything here.
+    if (!matched.key.isZoneKey) {
+      checks.push(
+        fail(
+          'ds-zone-flag',
+          'Vouched key is a zone key',
+          `the DS points at key ${matched.key.tag}, whose Zone Key flag (bit 7) is clear — it may not sign this zone's RRsets`,
+          'NOT_A_ZONE_KEY'
+        )
+      );
+      return stop('NOT_A_ZONE_KEY', 'BOGUS');
     }
     vouchedKey = matched.key;
     for (const check of matched.checks) {
@@ -372,18 +451,32 @@ async function validateLink(
     };
   }
 
-  // The key that signed the DNSKEY RRset must be the very key the parent
-  // vouched for. Without this the DS would prove nothing: a zone could publish
-  // an attacker's key alongside its own and sign the set with the attacker's.
+  // The key that signed the DNSKEY RRset must be THE VERY KEY the parent
+  // vouched for -- compared as bytes, never by key tag.
+  //
+  // Comparing tags here would be a real vulnerability, not a stylistic point.
+  // A tag is a 16-bit checksum, so an attacker can grind roughly 2^16 keypairs
+  // until one collides with a zone's real KSK tag, persuade the zone to
+  // publish it alongside the real key, and sign the DNSKEY RRset with theirs.
+  // `verifyRrset` tries every key carrying the tag and stops at the one that
+  // verifies, so the key that VERIFIED would be the attacker's while the key
+  // the DS matched is the real one -- and a tag comparison would call that a
+  // match. RFC 4035 section 5.2 requires that "the corresponding private key
+  // has signed the child zone's apex DNSKEY RRset", which is a statement about
+  // the key, not about its index.
   const signer = dnskeyVerification.attempts.find((a) => a.verified)?.keyUsed ?? null;
-  if (!signer || !vouchedKey || signer.tag !== vouchedKey.tag) {
+  const sameKey =
+    signer !== null && vouchedKey !== null && compareBytes(signer.rdata, vouchedKey.rdata) === 0;
+  if (!sameKey) {
     checks.push(
       fail(
         'binding',
         'Vouched key signed the set',
-        signer
-          ? `the DNSKEY RRset was signed by key ${signer.tag}, but the parent vouched for key ${vouchedKey?.tag}`
-          : 'no key could be identified as the signer of the DNSKEY RRset',
+        signer && vouchedKey && signer.tag === vouchedKey.tag
+          ? `the DNSKEY RRset was signed by a DIFFERENT key that happens to share tag ${signer.tag} with the one the parent vouched for — a tag is a checksum, so a collision proves nothing`
+          : signer
+            ? `the DNSKEY RRset was signed by key ${signer.tag}, but the parent vouched for key ${vouchedKey?.tag}`
+            : 'no key could be identified as the signer of the DNSKEY RRset',
         'KEYTAG_MISMATCH'
       )
     );
@@ -393,7 +486,7 @@ async function validateLink(
     pass(
       'binding',
       'Vouched key signed the set',
-      `key ${signer.tag} is both the key the parent vouched for and the key that signed this zone's DNSKEY RRset, so trust carries across the cut`
+      `the key that signed this zone's DNSKEY RRset is byte-for-byte the key the parent vouched for (tag ${signer.tag}), so trust carries across the cut`
     )
   );
 
@@ -408,6 +501,8 @@ async function validateLink(
     dsMatches,
     dnskeyVerification,
     dsVerification,
-    noDsProof,
+    // A link that reaches this point took the DS route, not the no-DS route:
+    // the unsigned-delegation branch returns from inside the `if` above.
+    noDsProof: null,
   };
 }

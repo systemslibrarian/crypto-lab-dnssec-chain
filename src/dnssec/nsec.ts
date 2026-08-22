@@ -19,7 +19,7 @@
  * covering denial both exist.
  */
 
-import { compareNames, nameEquals, presentName, type Labels } from '../dns/name.ts';
+import { compareNames, isAtOrBelow, nameEquals, presentName, type Labels } from '../dns/name.ts';
 import { decodeNsec, type NsecRdata } from '../dns/rdata.ts';
 import { RR_TYPE, typeName } from '../dns/types.ts';
 
@@ -79,8 +79,15 @@ export interface DenialProof {
  * bit map omits the queried type. Because the bitmap lists every type the name
  * DOES have, a NODATA denial is also a free inventory of the name.
  */
-export function proveNoData(records: readonly NsecRecord[], name: Labels, type: number): DenialProof {
+export function proveNoData(
+  records: readonly NsecRecord[],
+  name: Labels,
+  type: number,
+  zone: Labels
+): DenialProof {
   const steps: DenialStep[] = [];
+  const bailiwick = inBailiwick(steps, name, zone);
+  if (!bailiwick) return { proven: false, steps, usedOwners: [] };
   const match = records.find((r) => nsecMatches(r, name));
   if (!match) {
     steps.push({
@@ -122,9 +129,14 @@ export function proveNoData(records: readonly NsecRecord[], name: Labels, type: 
  * The wildcard proved here is at the closest encloser: the deepest existing
  * ancestor of the queried name, which the covering NSEC itself identifies.
  */
-export function proveNxdomain(records: readonly NsecRecord[], name: Labels): DenialProof {
+export function proveNxdomain(
+  records: readonly NsecRecord[],
+  name: Labels,
+  zone: Labels
+): DenialProof {
   const steps: DenialStep[] = [];
   const used: string[] = [];
+  if (!inBailiwick(steps, name, zone)) return { proven: false, steps, usedOwners: [] };
 
   const covering = records.find((r) => nsecCovers(r, name));
   if (!covering) {
@@ -145,6 +157,18 @@ export function proveNxdomain(records: readonly NsecRecord[], name: Labels): Den
   // The closest encloser is the longest suffix shared by the covering NSEC's
   // owner and its next name that is also a suffix of the queried name.
   const encloser = closestEncloser(covering, name);
+  // The encloser has to be inside the zone. Without this check, a covering
+  // record whose owner shares no labels with the query yields a zero-label
+  // "encloser" -- the ROOT -- and the wildcard checked becomes `*.`, a name
+  // that cannot be the closest encloser of anything this zone speaks for.
+  if (!isAtOrBelow(encloser, zone)) {
+    steps.push({
+      label: 'Closest encloser identified',
+      passed: false,
+      detail: `the deepest shared ancestor is ${presentName(encloser)}, which is outside ${presentName(zone)} — this record cannot be part of a proof about ${presentName(name)}`,
+    });
+    return { proven: false, steps, usedOwners: used };
+  }
   const wildcard: Labels = [Uint8Array.of(0x2a), ...encloser];
   steps.push({
     label: 'Closest encloser identified',
@@ -178,6 +202,29 @@ export function proveNxdomain(records: readonly NsecRecord[], name: Labels): Den
   });
 
   return { proven: true, steps, usedOwners: used };
+}
+
+/**
+ * A denial is only meaningful for names the answering zone speaks for.
+ *
+ * Left out, this is a real hole rather than a formality. The LAST record in an
+ * NSEC chain wraps -- its next name is the apex, which sorts before everything
+ * else -- so by construction it covers every name sorting after the last owner
+ * in the zone, INCLUDING names in completely unrelated zones. One zone's
+ * perfectly valid signed chain would then "prove" that `www.example.org.` does
+ * not exist. The interval arithmetic is right; the bailiwick is what makes it
+ * mean something.
+ */
+function inBailiwick(steps: DenialStep[], name: Labels, zone: Labels): boolean {
+  const inside = isAtOrBelow(name, zone);
+  steps.push({
+    label: 'Query is inside this zone',
+    passed: inside,
+    detail: inside
+      ? `${presentName(name)} is at or below ${presentName(zone)}, so this zone's records can speak about it`
+      : `${presentName(name)} is outside ${presentName(zone)} — no record from this zone can deny it, however the intervals happen to fall`,
+  });
+  return inside;
 }
 
 /**
@@ -218,8 +265,13 @@ export function interestingTypes(types: readonly number[]): number[] {
  * own DS record. That last check is the one people leave out, and leaving it
  * out lets a child declare itself unsigned.
  */
-export function proveNsecNoDs(records: readonly NsecRecord[], delegation: Labels): DenialProof {
+export function proveNsecNoDs(
+  records: readonly NsecRecord[],
+  delegation: Labels,
+  zone: Labels
+): DenialProof {
   const steps: DenialStep[] = [];
+  if (!inBailiwick(steps, delegation, zone)) return { proven: false, steps, usedOwners: [] };
   const match = records.find((r) => nsecMatches(r, delegation));
   if (!match) {
     steps.push({

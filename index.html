@@ -78,7 +78,9 @@
         letter-spacing: 0.12em;
       }
       .cl-sub {
-        color: #7faea2;
+        /* The fleet value, kept: 4.85:1 on the bar's #0b1512, which clears AA
+           for this size. Nothing here needed changing. */
+        color: #5e8b80;
         font-size: 0.72rem;
         letter-spacing: 0.04em;
       }
@@ -110,7 +112,9 @@
       }
       .cl-btn:hover {
         background: color-mix(in srgb, var(--accent, #35d6bb) 14%, transparent);
-        border-color: #eafff8;
+        /* The fleet value. Measured 5.42:1 against the hovered fill with this
+           lab's accent, so 1.4.11 is satisfied without diverging. */
+        border-color: var(--accent, #35d6bb);
         color: #eafff8;
       }
       .cl-btn svg {

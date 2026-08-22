@@ -28,11 +28,17 @@ import { nextNameFrom, queryZone, typesFrom, type ZoneResponse } from '../zone/r
 /**
  * A type number nothing in the demo zone carries.
  *
- * 64444 is inside the private-use range, so asking for it is a legal query
- * that no name can answer — which is exactly what a walker wants, because
- * every existing name then produces the NSEC record that names its successor.
+ * 65280 is the first entry in RFC 6895 section 3.1's PRIVATE USE range for RR
+ * types (0xFF00-0xFFFE), so asking for it is a legal query that no name in a
+ * normal zone can answer — which is exactly what a walker wants, because every
+ * existing name then produces the NSEC record that names its successor.
+ *
+ * The neighbouring block, 0xF000-0xFEFF, is "reserved for future use, IETF
+ * Review required" rather than private use; picking a number out of THAT range
+ * would be squatting on unassigned code points rather than using the range set
+ * aside for exactly this.
  */
-export const PROBE_TYPE = 64444;
+export const PROBE_TYPE = 65280;
 
 export interface WalkStep {
   readonly index: number;

@@ -9,23 +9,30 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseName, presentName } from '../dns/name.ts';
-import { RR_TYPE, toRRsets } from '../dns/types.ts';
+import { isWildcardExpansion, signedOwnerName } from '../dnssec/canonical.ts';
+import { parseName, presentName, rrsigLabelCount } from '../dns/name.ts';
+import { decodeRrsig, encodeRrsig, parseRdata } from '../dns/rdata.ts';
+import { CLASS_IN, RR_TYPE, toRRsets, typeName } from '../dns/types.ts';
 import { validateChain } from '../dnssec/chain.ts';
+import { proveNsecNoDs, toNsecRecord } from '../dnssec/nsec.ts';
 import { nsec3Hash, proveNsec3Nxdomain, toNsec3Record } from '../dnssec/nsec3.ts';
-import { fromBase32Hex } from '../dns/codec.ts';
+import { verifyRrset } from '../dnssec/verify.ts';
+import { fromBase32Hex, toBase32Hex } from '../dns/codec.ts';
 import {
   buildDemoZone,
   buildHierarchy,
+  demoKeys,
   DEMO_EXPIRATION,
   DEMO_INCEPTION,
   DEMO_NOW,
   GUESSABLE_LABELS,
   HIGH_ENTROPY_LABELS,
   RECOMMENDED_NSEC3,
+  TLD,
   ZONE,
 } from './demo.ts';
 import { checkDenial, queryZone, resolveInDemo } from './resolve.ts';
+import { signRrsetAs } from './sign.ts';
 
 const at = { now: DEMO_NOW } as const;
 
@@ -52,12 +59,95 @@ describe('a zone signed in the page', () => {
     expect(resolution.result.answer?.verification.attempts[0]?.keyUsed?.algorithm).toBe(13);
   });
 
-  it('re-verifies every RRset it signed', async () => {
+  it('re-verifies every RRset it signed, cryptographically', async () => {
+    // Not "an RRSIG exists" -- that would pass against a signer that emitted
+    // 64 zero octets. Every signed RRset in the zone, including the NSEC
+    // denial chain and the DNSKEY set itself, is run back through the same
+    // verifier that judges the pinned real-world chain.
     const zone = await buildDemoZone();
+    const keys = zone.dnskey.rrset.rdatas;
+    let checked = 0;
     for (const [, signed] of zone.signed) {
       expect(signed.rrsigs.length, presentName(signed.rrset.name)).toBeGreaterThan(0);
+      const result = await verifyRrset(signed.rrset, signed.rrsigs, keys, {
+        zone: zone.spec.apex,
+        now: DEMO_NOW,
+      });
+      expect(
+        result.verified,
+        `${presentName(signed.rrset.name)} ${typeName(signed.rrset.type)}: ${result.failure}`
+      ).toBe(true);
+      checked += 1;
     }
+    // Guard the loop: a zone that produced nothing would otherwise pass here.
+    expect(checked).toBeGreaterThan(GUESSABLE_LABELS.length);
     expect(zone.owners.length).toBe(GUESSABLE_LABELS.length + 1);
+
+    // The denial chain specifically -- one signed NSEC per owner name.
+    expect(zone.denialRecords).toHaveLength(zone.owners.length);
+    for (const denial of zone.denialRecords) {
+      const result = await verifyRrset(denial.rrset, denial.rrsigs, keys, {
+        zone: zone.spec.apex,
+        now: DEMO_NOW,
+      });
+      expect(result.verified, presentName(denial.rrset.name)).toBe(true);
+    }
+  });
+
+  it('signs and verifies a wildcard answer through the Labels reconstruction', async () => {
+    // A wildcard RRSIG counts FEWER labels than the name it answers for, and
+    // the validator has to rebuild `*.<suffix>` to check it. Nothing else in
+    // the suite reaches that branch: the demo zone has no wildcard, and no RFC
+    // vector or pinned RRSIG is a wildcard expansion either.
+    const keys = await demoKeys();
+    const wildcard = parseName('*.demo.example.');
+    const rrset = {
+      name: wildcard,
+      type: RR_TYPE.A,
+      class: CLASS_IN,
+      ttl: 3600,
+      rdatas: [parseRdata(RR_TYPE.A, '203.0.113.200')],
+    };
+    expect(rrsigLabelCount(wildcard)).toBe(2);
+    const rrsig = await signRrsetAs(rrset, keys.zoneZsk, {
+      apex: ZONE,
+      inception: DEMO_INCEPTION,
+      expiration: DEMO_EXPIRATION,
+    });
+
+    // The synthesized answer: a name that does not literally exist, carrying
+    // the wildcard's signature.
+    const synthesized = { ...rrset, name: parseName('anything.demo.example.') };
+    expect(isWildcardExpansion(synthesized.name, 2)).toBe(true);
+    expect(presentName(signedOwnerName(synthesized.name, 2))).toBe('*.demo.example.');
+
+    const dnskeys = [keys.zoneKsk.rdata, keys.zoneZsk.rdata];
+    const ok = await verifyRrset(synthesized, [rrsig], dnskeys, { zone: ZONE, now: DEMO_NOW });
+    expect(ok.verified).toBe(true);
+    expect(ok.attempts[0]?.fromWildcard).toBe(true);
+
+    // The reconstruction is LOAD-BEARING. Take the very same signature and
+    // change only the Labels field to the literal name's count: the validator
+    // then stops reconstructing the wildcard and hashes `anything.demo.
+    // example.` instead, and the identical signature no longer verifies.
+    const decoded = decodeRrsig(rrsig);
+    const claimsLiteral = encodeRrsig({ ...decoded, labels: 3 });
+    const wrong = await verifyRrset(synthesized, [claimsLiteral], dnskeys, {
+      zone: ZONE,
+      now: DEMO_NOW,
+    });
+    expect(wrong.verified).toBe(false);
+    expect(wrong.failure).toBe('SIGNATURE_INVALID');
+    expect(wrong.attempts[0]?.fromWildcard).toBe(false);
+
+    // And a Labels field larger than the owner name has is not a wildcard at
+    // all — it is unreconstructable, and says so.
+    const impossible = encodeRrsig({ ...decoded, labels: 9 });
+    const rejected = await verifyRrset(synthesized, [impossible], dnskeys, {
+      zone: ZONE,
+      now: DEMO_NOW,
+    });
+    expect(rejected.failure).toBe('LABELS_INVALID');
   });
 });
 
@@ -96,11 +186,24 @@ describe('each link breaks with its own name', () => {
     expect(resolution.result.failure).toBe('RRSIG_NOT_YET_VALID');
   });
 
-  it('KEYTAG_MISMATCH when the zone signs its keys with a key nobody vouched for', async () => {
+  it('KEYTAG_MISMATCH when the child rolled its KSK and the DS still names the old one', async () => {
+    // The DS is the honest one, and the child now publishes a different
+    // key-signing key. `matchDs` stops first, at "the DS points at a key tag
+    // this child does not publish" -- which is the correct and most
+    // informative diagnosis for this shape, and is exactly what a resolver
+    // holding a stale cached DS sees.
+    //
+    // The DEEPER check -- that the key which signed the DNSKEY RRset is
+    // byte-for-byte the key the DS vouched for, even when the tags agree -- is
+    // not reachable from here, because the tags do not agree. It is pinned in
+    // `src/dnssec/downgrade.test.ts` with a real tag collision instead.
     const hierarchy = await buildHierarchy({ rogueKsk: true });
     const resolution = await resolveInDemo(hierarchy, parseName('www.demo.example.'), RR_TYPE.A, at);
     expect(resolution.result.status).toBe('BOGUS');
     expect(resolution.result.failure).toBe('KEYTAG_MISMATCH');
+    const link = resolution.result.links[2];
+    expect(link?.checks.find((c) => c.id === 'binding')).toBeUndefined();
+    expect(link?.checks.some((c) => c.label.includes('Referenced key') && !c.passed)).toBe(true);
   });
 
   it('SIGNATURE_INVALID when an answer’s bytes change after signing', async () => {
@@ -156,6 +259,34 @@ describe('INSECURE: an unsigned child under a signed parent', () => {
     expect(link?.checks.every((c) => c.passed)).toBe(true);
   });
 
+  it('rejects an NSEC that came from the child side of the cut', async () => {
+    // The all-passing case above proves the three steps are PRINTED. This one
+    // proves the conjunction that computes `proven` actually depends on them:
+    // a child's own apex NSEC carries SOA, NS and DNSKEY and never carries DS,
+    // so checking only the DS bit would let a signed zone declare itself
+    // unsigned.
+    const delegation = parseName('unsigned.example.');
+    const build = (types: number[]) =>
+      toNsecRecord(
+        delegation,
+        parseRdata(RR_TYPE.NSEC, `next.example. ${types.map(typeName).join(' ')}`)
+      );
+
+    const fromChild = proveNsecNoDs([build([RR_TYPE.NS, RR_TYPE.SOA, RR_TYPE.RRSIG, RR_TYPE.DNSKEY])], delegation, TLD);
+    expect(fromChild.proven).toBe(false);
+    expect(fromChild.steps.find((x) => x.label.startsWith('SOA absent'))?.passed).toBe(false);
+
+    const notADelegation = proveNsecNoDs([build([RR_TYPE.A, RR_TYPE.RRSIG])], delegation, TLD);
+    expect(notADelegation.proven).toBe(false);
+    expect(notADelegation.steps.find((x) => x.label.startsWith('NS present'))?.passed).toBe(false);
+
+    const stillHasDs = proveNsecNoDs([build([RR_TYPE.NS, RR_TYPE.DS, RR_TYPE.RRSIG])], delegation, TLD);
+    expect(stillHasDs.proven).toBe(false);
+
+    const fromParent = proveNsecNoDs([build([RR_TYPE.NS, RR_TYPE.RRSIG])], delegation, TLD);
+    expect(fromParent.proven).toBe(true);
+  });
+
   it('is a different outcome from a missing DS with no proof', async () => {
     // Removing the DS *and* the proof is not INSECURE, it is a hole. The
     // distinction is the entire point of authenticated denial.
@@ -205,16 +336,29 @@ describe('denial of existence, in both flavours', () => {
     const wrong = { ...RECOMMENDED_NSEC3, iterations: 5 };
     const proof = proveNsec3Nxdomain(records, parseName('nothing.demo.example.'), ZONE, wrong);
     expect(proof.proven).toBe(false);
-    expect(proof.steps[0]?.label).toBe('NSEC3 parameters agree');
-    expect(proof.steps[0]?.passed).toBe(false);
+    // Found by label rather than by index: the bailiwick check runs first.
+    const params = proof.steps.find((step) => step.label === 'NSEC3 parameters agree');
+    expect(params?.passed).toBe(false);
   });
 
-  it('hashes each name to the owner label the zone published', async () => {
+  it('publishes an NSEC3 owner label for every name, and each one is that name’s hash', async () => {
     const zone = await buildDemoZone({ denial: { kind: 'nsec3', params: RECOMMENDED_NSEC3 } });
-    for (const [label, name] of zone.hashedOwners) {
-      const { toBase32Hex } = await import('../dns/codec.ts');
-      expect(toBase32Hex(nsec3Hash(name, RECOMMENDED_NSEC3)).toLowerCase()).toBe(label);
+
+    // Read the labels the zone ACTUALLY PUBLISHES, off the NSEC3 owner names,
+    // rather than re-reading the map the signer built while producing them.
+    const published = zone.denialRecords
+      .filter((r) => r.rrset.type === RR_TYPE.NSEC3)
+      .map((r) => new TextDecoder().decode(r.rrset.name[0] ?? new Uint8Array()));
+    expect(published).toHaveLength(zone.owners.length);
+    expect(new Set(published).size).toBe(published.length);
+
+    // Every owner in the zone must appear exactly once in that set, hashed.
+    for (const owner of zone.owners) {
+      const expected = toBase32Hex(nsec3Hash(owner, RECOMMENDED_NSEC3)).toLowerCase();
+      expect(published, presentName(owner)).toContain(expected);
     }
+    // ...and the ring is sorted by hash, which is the whole point of NSEC3.
+    expect([...published].sort()).toEqual(published);
   });
 });
 

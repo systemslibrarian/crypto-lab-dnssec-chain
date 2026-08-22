@@ -159,7 +159,15 @@ export const FAILURES: Readonly<Record<FailureCode, FailureInfo>> = {
   },
 };
 
-/** The eight codes this lab's brief names, in the order the UI lists them. */
+/**
+ * The failure CODES the break-it-yourself exhibit lists, in the order it shows
+ * them.
+ *
+ * Six, not eight. `BOGUS` and `INSECURE` belong to the outcome vocabulary
+ * above rather than to this one — they are what a validator CONCLUDES, not
+ * what went wrong — so they cannot appear in a `FailureCode[]`, and the two
+ * exhibits that teach them say so in their own words instead.
+ */
 export const HEADLINE_FAILURE_CODES: readonly FailureCode[] = [
   'DS_MISMATCH',
   'RRSIG_EXPIRED',

@@ -76,17 +76,43 @@ function meter(fraction: number, label: string, none: boolean): HTMLElement {
   ]);
 }
 
+/**
+ * Every name in the zone, marked recovered or not.
+ *
+ * Colour is the LAST of three cues, never the only one: each chip carries a
+ * glyph a screen reader ignores, the word a screen reader reads, and the
+ * colour a sighted reader scans (WCAG 1.4.1). A legend above says what the two
+ * kinds are, so nobody has to infer the colour's meaning either.
+ */
 function chips(labelsFound: readonly string[], labelsMissed: readonly string[]): HTMLElement {
-  return list(
-    'ul',
-    'chips',
-    'Names recovered and names missed',
-    [
-      ...labelsFound.map((name) => el('li', { class: 'chip chip-found', role: 'listitem', text: name })),
-      ...labelsMissed.map((name) => el('li', { class: 'chip chip-safe', role: 'listitem', text: name })),
-    ],
-    'No names in the zone.'
-  );
+  const chip = (name: string, recovered: boolean): HTMLElement =>
+    el('li', { class: `chip ${recovered ? 'chip-found' : 'chip-safe'}`, role: 'listitem' }, [
+      el('span', { class: 'chip-glyph', 'aria-hidden': 'true', text: recovered ? '✗' : '✓' }),
+      el('span', { class: 'chip-name', text: name }),
+      el('span', { class: 'visually-hidden', text: recovered ? ' — recovered' : ' — not recovered' }),
+    ]);
+  return el('div', {}, [
+    el('p', { class: 'chip-legend' }, [
+      el('span', { class: 'chip chip-found' }, [
+        el('span', { class: 'chip-glyph', 'aria-hidden': 'true', text: '✗' }),
+        el('span', { class: 'chip-name', text: 'recovered' }),
+      ]),
+      el('span', { class: 'chip chip-safe' }, [
+        el('span', { class: 'chip-glyph', 'aria-hidden': 'true', text: '✓' }),
+        el('span', { class: 'chip-name', text: 'not recovered' }),
+      ]),
+    ]),
+    list(
+      'ul',
+      'chips',
+      'Every name in the zone, marked recovered or not recovered',
+      [
+        ...labelsFound.map((name) => chip(name, true)),
+        ...labelsMissed.map((name) => chip(name, false)),
+      ],
+      'No names in the zone.'
+    ),
+  ]);
 }
 
 /** The iterated hash, shown one round at a time. */
@@ -179,7 +205,23 @@ export function renderNsec3Panel(host: HTMLElement): void {
     if (running) return;
     running = true;
     output.dataset.state = 'pending';
-    const zone = await buildDemoZone({ labels, denial: { kind: 'nsec3', params: params() } });
+    let zone;
+    try {
+      zone = await buildDemoZone({ labels, denial: { kind: 'nsec3', params: params() } });
+    } catch (error) {
+      // Signing failed. Releasing the latch here is what keeps the panel
+      // usable: without it the guard above would swallow every later click and
+      // the page would sit on "pending" with no way back.
+      running = false;
+      output.dataset.state = 'error';
+      replace(
+        output,
+        el('div', { class: 'callout callout-danger' }, [
+          el('p', { text: `Could not sign the zone: ${(error as Error).message}` }),
+        ])
+      );
+      return;
+    }
     const target = targetFor(zone);
     const iterator = runDictionary(target, CANDIDATES, 250);
     const pump = (): void => {

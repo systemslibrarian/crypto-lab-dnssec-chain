@@ -35,3 +35,26 @@ export const DEMO_ED_SEEDS = {
   zoneKsk: '8139671b5198c5f861f852950ec8dea549f7a0a3ece5722032e76b84b51b22a2',
   rogueZsk: '96af9e694bfdee988ba87fea2709f69316289c38c5b19cec4bb664a6b724b5d5',
 } as const;
+
+/**
+ * Two unrelated Ed25519 keys whose DNSKEY RDATAs share a key tag.
+ *
+ * Found in 406 tries by generating random keys and watching for a repeat —
+ * which is the whole point. A key tag is a 16-bit checksum, so a collision is
+ * a birthday problem over 65,536 buckets, not a cryptographic feat: a few
+ * hundred keypairs is enough to hit one, and an attacker targeting ONE
+ * specific tag needs about 65,536.
+ *
+ * They exist so `src/dnssec/downgrade.test.ts` can pin the rule that a
+ * validator must bind the parent's DS to the child's KEY and never to its tag.
+ * With these two published side by side, a tag comparison calls the wrong key
+ * a match; a byte comparison does not.
+ *
+ * Both flagged 257 (Zone Key + Secure Entry Point), protocol 3, algorithm 15,
+ * which is the shape a KSK takes. Tag: 54495.
+ */
+export const COLLIDING_TAG_SEEDS = {
+  tag: 54495,
+  vouched: '9c3aef51260d0e9b65707b6b4dd927696614569664e9108b06a8e30c512d7e87',
+  impostor: 'd18c1bb767875b0fa5788dfacf030646599dced9395832faa5350537477192ee',
+} as const;

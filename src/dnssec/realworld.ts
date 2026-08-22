@@ -17,7 +17,7 @@
 import { fromBase32Hex } from '../dns/codec.ts';
 import { presentName, type Labels } from '../dns/name.ts';
 import { decodeNsec3 } from '../dns/rdata.ts';
-import { RR_TYPE, type ResourceRecord, type RRset } from '../dns/types.ts';
+import { RR_TYPE, toRRsets, type ResourceRecord, type RRset } from '../dns/types.ts';
 import { PINNED_ZONES, PINNED_CHAIN, rrsetOf, rrsigsFor, section, type PinnedChain } from '../vectors/pinned.ts';
 import { ROOT_TRUST_ANCHORS } from '../vectors/rfc.ts';
 import { fromHex } from '../dns/codec.ts';
@@ -145,6 +145,14 @@ export function buildInsecureChain(
   if (!first) throw new Error('the captured no-DS answer carries no NSEC3 records');
   const params: Nsec3Params = paramsOf(first);
 
+  // Each captured NSEC3 with the RRSIG `.com` actually sent for it. The chain
+  // verifies these under `.com`'s keys before it will read the proof, so the
+  // INSECURE verdict rests on a signature rather than on an assertion.
+  const rrsets = toRRsets(denial.filter((r) => r.type === RR_TYPE.NSEC3)).map((rrset) => ({
+    rrset,
+    rrsigs: rrsigsFor(denial, rrset.name, RR_TYPE.NSEC3),
+  }));
+
   const zones: ZoneEvidence[] = [
     base.zones[0]!,
     base.zones[1]!,
@@ -155,7 +163,7 @@ export function buildInsecureChain(
       dnskeyRrsigs: [],
       ds: null,
       dsRrsigs: [],
-      noDsProof: { kind: 'nsec3', records: nsec3Records, params },
+      noDsProof: { kind: 'nsec3', records: nsec3Records, rrsets, params },
     },
   ];
   return { ...base, zones, answer: null };
@@ -189,20 +197,19 @@ export interface DenialEvidence {
 export function buildBlackLieDenial(chain: PinnedChain = PINNED_CHAIN): DenialEvidence {
   const captured = section(chain, 'cloudflare-nxdomain');
   const nsecRecords = captured.authority.filter((r) => r.type === RR_TYPE.NSEC);
+  // The response code is read from THIS section and no further: slicing only
+  // from the section marker would run on into every later section, so a
+  // NOERROR anywhere below would answer for this one.
+  const start = chain.rawText.indexOf(';; ==== cloudflare-nxdomain');
+  const end = chain.rawText.indexOf(';; ====', start + 1);
+  const body = chain.rawText.slice(start, end === -1 ? undefined : end);
   return {
     queried: PINNED_ZONES.nxdomain,
     zone: PINNED_ZONES.cloudflare,
     nsec: nsecRecords.map(nsecFrom),
     records: captured.authority,
-    rcodeIsNoError: /status: NOERROR/.test(chain.rawText.slice(chain.rawText.indexOf('cloudflare-nxdomain'))),
+    rcodeIsNoError: /status: NOERROR/.test(body),
   };
-}
-
-/** Every NSEC3 in the captured no-DS answer, for display alongside the proof. */
-export function capturedOptOutNsec3(chain: PinnedChain = PINNED_CHAIN): Nsec3Record[] {
-  return section(chain, 'com-ds-for-google-none')
-    .authority.filter((r) => r.type === RR_TYPE.NSEC3)
-    .map(nsec3From);
 }
 
 /** The Opt-Out flag as `.com` actually sets it, read off the wire. */

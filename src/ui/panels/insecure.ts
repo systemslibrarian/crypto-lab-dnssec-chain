@@ -12,7 +12,7 @@
 import { parseName, presentName } from '../../dns/name.ts';
 import { RR_TYPE } from '../../dns/types.ts';
 import { validateChain } from '../../dnssec/chain.ts';
-import { buildInsecureChain, capturedOptOutNsec3 } from '../../dnssec/realworld.ts';
+import { buildInsecureChain, capturedOptOutFlag } from '../../dnssec/realworld.ts';
 import { STATUS } from '../../dnssec/failures.ts';
 import { PINNED_CHAIN, section } from '../../vectors/pinned.ts';
 import { buildHierarchy, DEMO_NOW } from '../../zone/demo.ts';
@@ -94,7 +94,7 @@ export function renderInsecurePanel(host: HTMLElement): void {
   }
 
   const captured = section(PINNED_CHAIN, 'com-ds-for-google-none');
-  const optOut = capturedOptOutNsec3();
+  const optOutSet = capturedOptOutFlag();
 
   host.append(
     el('h2', { text: 'A chain that ends is not a chain that broke' }),
@@ -125,7 +125,7 @@ export function renderInsecurePanel(host: HTMLElement): void {
     disclosure(
       'Show what .com actually sent',
       para(
-        `Two NSEC3 records and their signatures, plus the SOA. Neither NSEC3 is owned by google.com — under Opt-Out the signer is allowed to skip one entirely, so the proof runs through the closest encloser and a covering record with the Opt-Out bit set. The flag is ${optOut.length > 0 ? 'set' : 'clear'} on the covering record.`
+        `Two NSEC3 records and their signatures, plus the SOA. Neither NSEC3 is owned by google.com — under Opt-Out the signer is allowed to skip one entirely, so the proof runs through the closest encloser and a covering record with the Opt-Out bit set. The flag is ${optOutSet ? 'set' : 'clear'} on the covering record — read off the record's own Flags octet, not inferred.`
       ),
       recordBlock(
         captured.authority.map(

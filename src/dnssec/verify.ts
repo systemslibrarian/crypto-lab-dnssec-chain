@@ -310,18 +310,26 @@ async function verifyOne(
 
   // 7. The cryptography, over the bytes RFC 4034 section 3.1.8.1 defines.
   const signedData = buildSignedData(rrset, sig);
+  // Why a key was unusable, if one was. Kept so the reported detail is TRUE:
+  // "these are not the records that were signed" is the right sentence for a
+  // failed verification and the WRONG one for a key that could not be parsed
+  // at all, and reporting the second as the first sends a reader looking for
+  // an attacker who is not there.
+  const keyProblems: string[] = [];
   for (const key of zoneKeys) {
     let ok = false;
     try {
       ok = await verifySignature(sig.algorithm, key.publicKey, sig.signature, signedData.signedData);
     } catch (error) {
       if (error instanceof UnsupportedAlgorithmError) {
-        checks.push(
-          fail('algorithm', 'Algorithm support', `${algorithmName(sig.algorithm)} is not implemented here`, 'ALG_UNSUPPORTED')
-        );
-        return stop('ALG_UNSUPPORTED');
+        // Unreachable today: `SUPPORTED_ALGORITHMS` is checked a few lines
+        // above, so an algorithm arriving here means that set and
+        // `verifySignature`'s own switch have drifted apart. Rethrow rather
+        // than report — an internal inconsistency should be loud, not
+        // relabelled as a cryptographic failure.
+        throw error;
       }
-      // A malformed key or signature is a rejection by this key, not a crash.
+      keyProblems.push(`key ${key.tag}: ${(error as Error).message}`);
       ok = false;
     }
     if (ok) {
@@ -348,7 +356,12 @@ async function verifyOne(
     fail(
       'signature',
       'Signature',
-      `${algorithmName(sig.algorithm)} rejected the signature over all ${signedData.signedData.length} signed octets — the records offered are not the records signed`,
+      keyProblems.length === zoneKeys.length
+        ? `no candidate key could be used at all — ${keyProblems.join('; ')}`
+        : `${algorithmName(sig.algorithm)} rejected the signature over all ${signedData.signedData.length} signed octets — the records offered are not the records signed` +
+          (keyProblems.length > 0
+            ? ` (and ${keyProblems.length} candidate key could not be parsed: ${keyProblems.join('; ')})`
+            : ''),
       'SIGNATURE_INVALID'
     )
   );
@@ -396,6 +409,27 @@ export function matchDs(dsRdata: Uint8Array, childZone: Labels, dnskeyRdatas: re
   const ds = decodeDs(dsRdata);
   const checks: Check[] = [];
   const keys = describeKeys(dnskeyRdatas);
+
+  // RFC 6840 section 5.2: "a validator disregards any authenticated DS records
+  // that specify unknown or unsupported DNSKEY algorithms. If none are left,
+  // the zone is treated as if it were unsigned." So an algorithm this lab does
+  // not implement is reported as its own outcome, exactly like an unsupported
+  // digest type -- and NOT as a key-tag mismatch, which would read as a
+  // forgery and blame the zone for this validator's gap.
+  if (!SUPPORTED_ALGORITHMS.has(ds.algorithm)) {
+    checks.push(
+      fail(
+        'ds-algorithm',
+        'Signing algorithm',
+        `DS names ${algorithmName(ds.algorithm)} (${ds.algorithm}), a real DNSSEC algorithm this validator does not implement — RFC 6840 says to disregard such a DS rather than treat it as broken`,
+        'ALG_UNSUPPORTED'
+      )
+    );
+    return { ds, key: null, checks, matched: false, failure: 'ALG_UNSUPPORTED', preimage: null, computedDigest: null };
+  }
+  checks.push(
+    pass('ds-algorithm', 'Signing algorithm', `${algorithmName(ds.algorithm)} is implemented here`)
+  );
 
   if (!SUPPORTED_DIGEST_TYPES.has(ds.digestType)) {
     checks.push(

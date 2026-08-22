@@ -8,6 +8,12 @@
  * vouched for, produces three completely different diagnoses — and those are
  * the ones that actually take zones off the internet.
  *
+ * Eight breaks, seven distinct codes. Two of them land on KEYTAG_MISMATCH from
+ * opposite ends — a DS pointing at a key the child never published, and a
+ * child that stopped using the key the DS points at — and that is not a
+ * shortcoming of the diagnosis. From the validator's seat the two are the same
+ * observation: nothing the child publishes is what the parent vouched for.
+ *
  * The one exception is the unsupported-algorithm case, and it is not
  * synthesized at all: it runs RFC 6605's own ECDSA P-384 example, a real and
  * perfectly valid signature this lab does not implement. That is what makes
@@ -208,7 +214,22 @@ export function renderBreakPanel(host: HTMLElement): void {
     output.dataset.status = 'pending';
     output.dataset.failure = 'pending';
     replace(output, el('p', { class: 'prose', text: 'Signing and validating…' }));
-    const view = await runBreak(current);
+    let view: HTMLElement;
+    try {
+      view = await runBreak(current);
+    } catch (error) {
+      // A rejection here would otherwise leave the panel on "Signing…"
+      // forever, which reads as a hung page rather than as a failure.
+      output.dataset.status = 'error';
+      output.dataset.failure = 'error';
+      replace(
+        output,
+        el('div', { class: 'callout callout-danger' }, [
+          el('p', { text: `This break could not be built: ${(error as Error).message}` }),
+        ])
+      );
+      return;
+    }
     output.dataset.break = current.id;
     output.dataset.expected = current.expect ?? 'none';
     output.dataset.failure = view.dataset.failure ?? 'none';
@@ -258,7 +279,7 @@ export function renderBreakPanel(host: HTMLElement): void {
     ),
     el('p', { class: 'prose' }, [
       badge('info', 'note'),
-      ' Two of these are not failures at all. INSECURE is a chain that ended correctly — the next tab — and an unsupported algorithm is a statement about the validator, not about the zone.',
+      ' One entry in that list is not a failure at all: an unsupported algorithm is a statement about this validator, not about the zone, and it lands on INDETERMINATE. A chain that ends legitimately because the parent proved there is no DS is a third outcome again — INSECURE — and it has the next tab to itself.',
     ])
   );
 

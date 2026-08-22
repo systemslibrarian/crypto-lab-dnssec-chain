@@ -99,7 +99,7 @@ export function renderChainPanel(host: HTMLElement): void {
 
     el('h3', { text: 'Where trust starts' }),
     para(
-      'Exactly one key in the whole system is not learned from the network. IANA publishes the root key-signing key’s fingerprints, resolvers ship with them, and everything else is derived. These are those fingerprints, transcribed from data.iana.org:'
+      'One layer of this system is not learned from the network at all: the root key-signing keys. IANA publishes their fingerprints, resolvers compile them in, and every other key in the DNS is derived from there. More than one is configured at a time so a rollover has an overlap — the retiring anchor and its successor are both trusted until the old one is withdrawn. These are the current ones, transcribed from data.iana.org:'
     ),
     el('table', { class: 'data' }, [
       el('thead', {}, [

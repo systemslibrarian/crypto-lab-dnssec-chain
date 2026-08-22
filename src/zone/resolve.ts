@@ -44,22 +44,6 @@ export interface ZoneResponse {
   readonly denialKind: 'none' | 'nodata' | 'nxdomain';
 }
 
-const nsecRecordsOf = (zone: SignedZone): NsecRecord[] =>
-  zone.denialRecords
-    .filter((r) => r.rrset.type === RR_TYPE.NSEC)
-    .flatMap((r) => r.rrset.rdatas.map((rdata) => toNsecRecord(r.rrset.name, rdata)));
-
-const nsec3RecordsOf = (zone: SignedZone): Nsec3Record[] =>
-  zone.denialRecords
-    .filter((r) => r.rrset.type === RR_TYPE.NSEC3)
-    .flatMap((r) =>
-      r.rrset.rdatas.map((rdata) => {
-        const first = r.rrset.name[0];
-        if (!first) throw new Error('NSEC3 owner name has no labels');
-        return toNsec3Record(r.rrset.name, rdata, fromBase32Hex(new TextDecoder().decode(first)));
-      })
-    );
-
 const signedFor = (zone: SignedZone, owner: Labels, type: number): SignedRrset | null =>
   lookup(zone, owner, type);
 
@@ -173,23 +157,54 @@ function coversHash(record: Nsec3Record, hash: Uint8Array): boolean {
   return vsOwner > 0 && vsNext < 0;
 }
 
-/** Verify a response's denial proof, whichever kind it is. */
+/**
+ * Verify a response's denial proof, whichever kind it is.
+ *
+ * The records come from `response.authority` -- from the ANSWER -- and never
+ * from the zone's own chain. That distinction is the whole honesty of the walk
+ * panel: a validator judges what it was sent, so a response that omits,
+ * truncates or substitutes its denial records has to FAIL here. Rebuilding the
+ * record set from the zone file instead would make the verdict a statement
+ * about the zone rather than about the answer, and would hide any bug in the
+ * server's denial construction behind a permanent green tick.
+ */
 export function checkDenial(
   zone: SignedZone,
   response: ZoneResponse
 ): DenialProof | Nsec3Denial | null {
   if (response.denialKind === 'none') return null;
+  const apex = zone.spec.apex;
   if (zone.spec.denial.kind === 'nsec') {
-    const records = nsecRecordsOf(zone);
+    const records = nsecRecordsIn(response.authority);
     return response.denialKind === 'nodata'
-      ? proveNoData(records, response.qname, response.qtype)
-      : proveNxdomain(records, response.qname);
+      ? proveNoData(records, response.qname, response.qtype, apex)
+      : proveNxdomain(records, response.qname, apex);
   }
-  const records = nsec3RecordsOf(zone);
+  const records = nsec3RecordsIn(response.authority);
   const params = zone.spec.denial.params;
   return response.denialKind === 'nodata'
-    ? proveNsec3NoData(records, response.qname, response.qtype, params)
-    : proveNsec3Nxdomain(records, response.qname, zone.spec.apex, params);
+    ? proveNsec3NoData(records, response.qname, response.qtype, params, apex)
+    : proveNsec3Nxdomain(records, response.qname, apex, params);
+}
+
+/** The NSEC records an answer actually carried. */
+export function nsecRecordsIn(authority: readonly SignedRrset[]): NsecRecord[] {
+  return authority
+    .filter((r) => r.rrset.type === RR_TYPE.NSEC)
+    .flatMap((r) => r.rrset.rdatas.map((rdata) => toNsecRecord(r.rrset.name, rdata)));
+}
+
+/** The NSEC3 records an answer actually carried. */
+export function nsec3RecordsIn(authority: readonly SignedRrset[]): Nsec3Record[] {
+  return authority
+    .filter((r) => r.rrset.type === RR_TYPE.NSEC3)
+    .flatMap((r) =>
+      r.rrset.rdatas.map((rdata) => {
+        const first = r.rrset.name[0];
+        if (!first) throw new Error('NSEC3 owner name has no labels');
+        return toNsec3Record(r.rrset.name, rdata, fromBase32Hex(new TextDecoder().decode(first)));
+      })
+    );
 }
 
 /** The NSEC a denial hands back, for the walker to read the next name off. */
@@ -251,7 +266,10 @@ export async function resolveInDemo(
   ];
 
   if (unsigned) {
-    const nsec = nsecRecordsOf(hierarchy.tld);
+    // The parent's NSEC at the delegation, WITH its signature. The chain
+    // verifies that signature before it will accept the proof -- an
+    // unauthenticated denial must not be able to end a chain at INSECURE.
+    const denial = lookup(hierarchy.tld, UNSIGNED_CHILD, RR_TYPE.NSEC);
     zones.push({
       zone: UNSIGNED_CHILD,
       title: 'unsigned.example.',
@@ -259,7 +277,11 @@ export async function resolveInDemo(
       dnskeyRrsigs: [],
       ds: null,
       dsRrsigs: [],
-      noDsProof: { kind: 'nsec', records: nsec },
+      noDsProof: {
+        kind: 'nsec',
+        records: denial ? nsecRecordsIn([denial]) : [],
+        rrsets: denial ? [{ rrset: denial.rrset, rrsigs: denial.rrsigs }] : [],
+      },
     });
   } else {
     const ds = signedOrEmpty(hierarchy.tld, ZONE, RR_TYPE.DS);

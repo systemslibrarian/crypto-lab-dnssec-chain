@@ -200,7 +200,12 @@ export async function buildDemoZone(options: DemoZoneOptions = {}): Promise<Sign
     record(ZONE, RR_TYPE.NS, 'ns1.demo.example.'),
     record(ZONE, RR_TYPE.NS, 'ns2.demo.example.'),
     record(ZONE, RR_TYPE.MX, '10 mail.demo.example.'),
-    record(ZONE, RR_TYPE.TXT, '"a teaching zone — every address here is RFC 5737 documentation space"'),
+    // ASCII only, deliberately. A character-string is a run of OCTETS, so this
+    // parser accepts a literal character only when it fits in one octet and
+    // requires anything else to be written as a `\DDD` escape -- exactly as
+    // the name parser does. Slipping a UTF-8 character in here and letting an
+    // encoder silently expand it to two bytes would change what gets signed.
+    record(ZONE, RR_TYPE.TXT, '"a teaching zone - every address here is RFC 5737 documentation space"'),
   ];
   labels.forEach((label, index) => {
     records.push(record([new TextEncoder().encode(label), ...ZONE], RR_TYPE.A, addressFor(index)));

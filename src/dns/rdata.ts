@@ -342,7 +342,25 @@ function tokenize(text: string): string[] {
       let value = '';
       while (j < text.length && text[j] !== '"') {
         if (text[j] === '\\' && j + 1 < text.length) {
-          value += text[j + 1];
+          // RFC 1035 section 5.1 gives a backslash TWO meanings inside a
+          // character-string, and the decimal one is the easy half to miss:
+          // `\065` is ONE octet (0x41), not the three characters 0, 6, 5.
+          // Getting it wrong here would be silent and would matter, because
+          // the RDATA assembled from this text is signed verbatim -- so the
+          // wrong octets would be the ones the signature covers.
+          const next = text[j + 1] ?? '';
+          if (next >= '0' && next <= '9') {
+            const digits = text.slice(j + 1, j + 4);
+            if (digits.length !== 3 || !/^\d{3}$/.test(digits)) {
+              throw new RdataError(`\\${digits} is not a three-digit decimal escape`, text);
+            }
+            const octet = Number(digits);
+            if (octet > 255) throw new RdataError(`decimal escape \\${digits} exceeds 255`, text);
+            value += String.fromCharCode(octet);
+            j += 4;
+            continue;
+          }
+          value += next;
           j += 2;
           continue;
         }
@@ -406,10 +424,24 @@ function parseIpv6(token: string): Uint8Array {
   return out;
 }
 
+/**
+ * TXT character-strings, one length octet each.
+ *
+ * `tokenize` has already resolved every `\DDD` escape to a single code unit
+ * in the 0..255 range, so the string is a sequence of OCTETS and is encoded as
+ * such. Running it through a UTF-8 encoder instead would turn every resolved
+ * escape above 0x7F into two bytes and silently change what gets signed.
+ */
 function encodeCharacterStrings(tokens: readonly string[]): Uint8Array {
   return concatBytes(
     ...tokens.map((t) => {
-      const bytes = new TextEncoder().encode(t);
+      const bytes = Uint8Array.from(t, (ch) => {
+        const code = ch.charCodeAt(0);
+        if (code > 0xff) {
+          throw new RdataError(`non-octet character ${JSON.stringify(ch)} in a character-string`, t);
+        }
+        return code;
+      });
       if (bytes.length > 255) throw new RdataError('TXT character-string exceeds 255 octets', t);
       return concatBytes(u8(bytes.length), bytes);
     })
@@ -533,7 +565,12 @@ export function presentRdata(type: number, rdata: Uint8Array): string {
       let i = 0;
       while (i < rdata.length) {
         const length = rdata[i]!;
-        out.push(`"${new TextDecoder().decode(rdata.subarray(i + 1, i + 1 + length))}"`);
+        const text = Array.from(rdata.subarray(i + 1, i + 1 + length), (b) => {
+          if (b === 0x22 || b === 0x5c) return `\\${String.fromCharCode(b)}`; // " and \
+          if (b >= 0x20 && b < 0x7f) return String.fromCharCode(b);
+          return `\\${String(b).padStart(3, '0')}`;
+        }).join('');
+        out.push(`"${text}"`);
         i += 1 + length;
       }
       return out.join(' ');

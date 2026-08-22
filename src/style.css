@@ -51,6 +51,19 @@
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+/*
+ * Border-box everywhere. Without this the UA default `content-box` makes
+ * `width: 100%` mean "the container's width PLUS my own padding and borders",
+ * which is precisely how the hero's aside came to be 387px wide inside a 380px
+ * viewport and push the whole document sideways. The WCAG 1.4.10 reflow check
+ * in `e2e/gate.ts` caught it; axe has no rule for it at all.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html {
   /* Longhand, not the `background` shorthand: axe and WebKit miss the shorthand. */
   background-color: var(--bg);
@@ -818,6 +831,19 @@ body {
   border: 1px solid var(--border);
   background-color: var(--bg);
   color: var(--text-dim);
+}
+.chip-glyph {
+  font-weight: 700;
+  margin-right: 0.3em;
+}
+.chip-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 .chip-found {
   border-color: var(--bad);

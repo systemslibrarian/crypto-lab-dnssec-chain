@@ -72,7 +72,7 @@ export function renderOnlinePanel(host: HTMLElement): void {
     const lines = denial.records.map(
       (r) => `${presentName(r.name)} ${r.ttl} IN ${typeName(r.type)} ${presentRdata(r.type, r.rdata)}`
     );
-    const proof = proveNxdomain(denial.nsec, denial.queried);
+    const proof = proveNxdomain(denial.nsec, denial.queried, denial.zone);
     comparison.dataset.style = 'synthesized';
     comparison.dataset.rcode = denial.rcodeIsNoError ? 'NOERROR' : 'NXDOMAIN';
     comparison.dataset.nxproof = proof.proven ? 'true' : 'false';

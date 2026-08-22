@@ -245,7 +245,7 @@ describe('online minimally covering denial, as captured', () => {
     // Black lies answer NODATA, so RFC 4035's two-part NXDOMAIN proof does not
     // apply and must not be claimed. Asserting the NXDOMAIN prover fails here
     // is what stops the page describing this as something it is not.
-    const proof = proveNxdomain(denial.nsec, denial.queried);
+    const proof = proveNxdomain(denial.nsec, denial.queried, denial.zone);
     expect(proof.proven).toBe(false);
   });
 });

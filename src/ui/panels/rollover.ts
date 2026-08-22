@@ -6,7 +6,7 @@
  * different resolvers hold different generations of the same zone, and a
  * change that is atomic at the server is not atomic on the internet.
  *
- * The two standard shapes (RFC 6781 sections 4.1.1 and 4.1.2) exist to make
+ * The two standard shapes (RFC 6781 sections 4.1.1.1 and 4.1.1.2) exist to make
  * every intermediate state validate for every resolver, whichever generation
  * it happens to be holding. Each one is signed and validated here so the
  * "every state works" claim is watched rather than read.
@@ -17,6 +17,7 @@ import { algorithmName, RR_TYPE } from '../../dns/types.ts';
 import { decodeRrsig } from '../../dns/rdata.ts';
 import { buildHierarchy, DEMO_NOW } from '../../zone/demo.ts';
 import { resolveInDemo } from '../../zone/resolve.ts';
+import { lookup } from '../../zone/sign.ts';
 import { describeKeys } from '../../dnssec/keytag.ts';
 import { renderChain } from '../chainview.ts';
 import { badge, button, controlGroup, disclosure, el, list, liveRegion, para, replace } from '../dom.ts';
@@ -61,8 +62,10 @@ async function renderStage(spec: StageSpec): Promise<HTMLElement> {
     now: DEMO_NOW,
   });
   const dnskeys = describeKeys(hierarchy.zone.dnskey.rrset.rdatas);
-  const answer = hierarchy.zone.signed.get('www.demo.example.|1|1');
-  const signers = (answer?.rrsigs ?? []).map((rdata) => decodeRrsig(rdata).keyTag);
+  const answerName = parseName('www.demo.example.');
+  const answer = lookup(hierarchy.zone, answerName, RR_TYPE.A);
+  if (!answer) throw new Error('the demo zone lost the record this stage reports on');
+  const signers = answer.rrsigs.map((rdata) => decodeRrsig(rdata).keyTag);
 
   return el('div', {
     class: 'reveal',
@@ -88,7 +91,7 @@ async function renderStage(spec: StageSpec): Promise<HTMLElement> {
     el('h4', { text: 'What signs one answer' }),
     recordBlock(
       [
-        `${presentName(answer?.rrset.name ?? [])} has ${signers.length} signature${signers.length === 1 ? '' : 's'}`,
+        `${presentName(answer.rrset.name)} has ${signers.length} signature${signers.length === 1 ? '' : 's'}`,
         ...signers.map((tag) => `  RRSIG by key tag ${tag}`),
       ],
       'Signatures over the answer RRset'
@@ -128,7 +131,7 @@ async function renderCachedDs(): Promise<HTMLElement> {
         'The DS lives at the parent, which usually means a registrar’s web form and a TTL measured in days. A zone operator can roll a zone-signing key alone, on their own schedule — that is what the two shapes above are for. Rolling the KEY-SIGNING key means a change at the parent, and the window between "the child stopped using the old key" and "every cache has dropped the old DS" is exactly how long the domain is dark.',
       ]),
       el('p', {}, [
-        'The rule that follows: never remove a key until every DS pointing at it has aged out of every cache. RFC 6781 sections 4.1.1 and 4.1.2 exist to make that waiting period safe rather than optional.',
+        'The rule that follows: never remove a key until every DS pointing at it has aged out of every cache. RFC 6781 sections 4.1.1.1 and 4.1.1.2 exist to make that waiting period safe rather than optional.',
       ]),
     ]),
   ]);
@@ -142,7 +145,20 @@ export function renderRolloverPanel(host: HTMLElement): void {
   const run = async (): Promise<void> => {
     output.dataset.stage = 'pending';
     replace(output, para('Signing…'));
-    const view = await renderStage(current);
+    let view: HTMLElement;
+    try {
+      view = await renderStage(current);
+    } catch (error) {
+      output.dataset.stage = 'error';
+      output.dataset.status = 'error';
+      replace(
+        output,
+        el('div', { class: 'callout callout-danger' }, [
+          el('p', { text: `This stage could not be signed: ${(error as Error).message}` }),
+        ])
+      );
+      return;
+    }
     output.dataset.stage = view.dataset.stage ?? current.id;
     output.dataset.status = view.dataset.status ?? 'unknown';
     output.dataset.keys = view.dataset.keys ?? '0';

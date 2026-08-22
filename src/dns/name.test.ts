@@ -11,6 +11,8 @@ import {
   rrsigLabelCount,
 } from './name.ts';
 import { toHex } from './codec.ts';
+import { parseRdata, presentRdata } from './rdata.ts';
+import { RR_TYPE } from './types.ts';
 
 describe('presentation parsing', () => {
   it('requires a fully qualified name', () => {
@@ -112,6 +114,38 @@ describe('RRSIG label counting', () => {
 
   it('excludes a leading wildcard label', () => {
     expect(rrsigLabelCount(parseName('*.example.com.'))).toBe(2);
+  });
+});
+
+describe('character-strings are octets, not text', () => {
+  it('resolves a three-digit decimal escape to ONE octet', () => {
+    // RFC 1035 section 5.1. Reading `\\065` as three characters would make the
+    // character-string two octets longer than it should be -- and since TXT
+    // RDATA is signed verbatim, those are the octets that would get signed.
+    expect(toHex(parseRdata(RR_TYPE.TXT, '"a\\065b"'))).toBe('03614162');
+    expect(presentRdata(RR_TYPE.TXT, parseRdata(RR_TYPE.TXT, '"a\\065b"'))).toBe('"aAb"');
+  });
+
+  it('round-trips an octet that has no printable spelling', () => {
+    const wire = parseRdata(RR_TYPE.TXT, '"\\000\\255"');
+    expect(toHex(wire)).toBe('0200FF');
+    expect(presentRdata(RR_TYPE.TXT, wire)).toBe('"\\000\\255"');
+  });
+
+  it('still handles the literal escapes', () => {
+    expect(toHex(parseRdata(RR_TYPE.TXT, '"a\\"b"'))).toBe('03612262');
+    expect(toHex(parseRdata(RR_TYPE.TXT, '"a\\\\b"'))).toBe('03615C62');
+  });
+
+  it('refuses a character that does not fit in one octet', () => {
+    // Accepting it would mean silently choosing an encoding for the caller,
+    // which is how a signature comes to cover bytes nobody wrote.
+    expect(() => parseRdata(RR_TYPE.TXT, '"caf\u00e9 \u2014 dash"')).toThrow(/non-octet/);
+  });
+
+  it('rejects a malformed decimal escape rather than guessing', () => {
+    expect(() => parseRdata(RR_TYPE.TXT, '"\\12"')).toThrow(/three-digit/);
+    expect(() => parseRdata(RR_TYPE.TXT, '"\\999"')).toThrow(/exceeds 255/);
   });
 });
 

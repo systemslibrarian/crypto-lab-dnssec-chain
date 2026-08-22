@@ -737,7 +737,11 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await scanAt('the shared skip link focused, slid in from top:-3rem');
 
   // ── 1. Build the chain ──────────────────────────────────────────────────
+  // Every clock preset, including `+1 day`: its note paragraph and its
+  // validation timestamp appear in no other state, so skipping it would leave
+  // that rendering unscanned.
   for (const [label, expected] of [
+    ['+1 day', 'SECURE'],
     ['+400 days', 'BOGUS'],
     ['−400 days', 'BOGUS'],
     ['The capture instant', 'SECURE'],
@@ -833,6 +837,16 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('#walk-out')).toHaveAttribute('data-complete', 'true');
   await scanAt('Walk: high-entropy labels recovered just as completely');
 
+  // Back to the ordinary zone and reset, so both of the remaining controls are
+  // driven and the emptied ring is scanned again with a rendered panel.
+  await page.locator('#panel-walk').getByRole('button', { name: 'Ordinary names' }).click();
+  await expect(page.locator('#walk-out')).toHaveAttribute('data-found', '0');
+  await page.locator('#panel-walk').getByRole('button', { name: 'Ask one question' }).click();
+  await expect(page.locator('#walk-out')).toHaveAttribute('data-found', '1');
+  await page.locator('#panel-walk').getByRole('button', { name: 'Start over' }).click();
+  await expect(page.locator('#walk-out')).toHaveAttribute('data-found', '0');
+  await scanAt('Walk: reset to an empty ring with the panel already rendered');
+
   await page.locator('#panel-walk').getByRole('button', { name: 'Offer a non-covering NSEC' }).click();
   await expect(page.locator('#panel-walk .check-bad')).not.toHaveCount(0);
   await scanAt('Walk: a forged denial rejected — the failed-check styling');
@@ -865,6 +879,17 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await page.locator('#panel-nsec3').getByRole('button', { name: '8-byte salt' }).click();
   await settled(page, '#nsec3-out', 'data-state');
   await scanAt('NSEC3: salted — the trace and the rate both re-rendered');
+
+  // One intermediate iteration count and the no-salt control, so every button
+  // in this panel is driven. The 10 and 50 presets render the same shape as
+  // 150 with different numbers, so only one of the three is scanned; that is a
+  // deliberate cap and it is stated here rather than left silent.
+  await page.locator('#panel-nsec3').getByRole('button', { name: '10', exact: true }).click();
+  await settled(page, '#nsec3-out', 'data-state');
+  await expect(page.locator('#nsec3-out')).toHaveAttribute('data-iterations', '10');
+  await page.locator('#panel-nsec3').getByRole('button', { name: /no salt/ }).click();
+  await settled(page, '#nsec3-out', 'data-state');
+  await scanAt('NSEC3: 10 iterations, salt removed again — every control in this panel driven');
 
   for (const summary of ['iterations and salt do not change', 'stated in the direction that is true']) {
     await page.locator('#panel-nsec3 .disclose-summary', { hasText: summary }).click();
