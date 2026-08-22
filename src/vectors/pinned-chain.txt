@@ -1,0 +1,135 @@
+;; PINNED DNSSEC CHAIN -- captured 2026-08-22T11:17:16Z
+;; capture-unixtime 1787397436
+;; Captured by scripts/capture-chain.sh. Committed on purpose: the lab
+;; never queries DNS at runtime. Validate against the pinned instant above.
+
+;; ==== root-dnskey ====
+;; dig +dnssec +norec @a.root-servers.net . DNSKEY
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 49002
+;; flags: qr aa; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 4096
+;; ANSWER SECTION:
+.			172800	IN	DNSKEY	256 3 8 AwEAAeCYD6Z7WWKVLeuWgowKP+3g+Gs1cnLKq7a3CaQxQpv8bfuFVI0W nG33qaSH/Mw9IBgifrdzf4XY/DQLnyBJ9MfaOyAWuEaEmYJ+GQPiwVVf stGwSA1McfFJUttTgq2Huu74KARhtA8wPo/N3XcyYQtNhz+qCM5NBb3e cx/naw6sYab9LxS6f2cU0q03++BP5Ks0Uef8WJCa/1izCYE+vMkwoltV +tENa3hpXiZ7jle/xdgaZrPi5ZGmyLVI34g1XVYrNlsCCTmNvFQIfzW5 STFQFsQpizczyFn9r3LzSxxPCNwdlCG84bER0BmdwqbF6Tanv+FxMOav rahkj4wIy5k=
+.			172800	IN	DNSKEY	257 3 8 AwEAAaz/tAm8yTn4Mfeh5eyI96WSVexTBAvkMgJzkKTOiW1vkIbzxeF3 +/4RgWOq7HrxRixHlFlExOLAJr5emLvN7SWXgnLh4+B5xQlNVz8Og8kv ArMtNROxVQuCaSnIDdD5LKyWbRd2n9WGe2R8PzgCmr3EgVLrjyBxWezF 0jLHwVN8efS3rCj/EWgvIWgb9tarpVUDK/b58Da+sqqls3eNbuv7pr+e oZG+SrDK6nWeL3c6H5Apxz7LjVc1uTIdsIXxuOLYA4/ilBmSVIzuDWfd RUfhHdY6+cn8HFRm+2hM8AnXGXws9555KrUB5qihylGa8subX2Nn6UwN R1AkUTV74bU=
+.			172800	IN	DNSKEY	257 3 8 AwEAAa96jeuknZlaeSrvyAJj6ZHv28hhOKkx3rLGXVaC6rXTsDc449/c idltpkyGwCJNnOAlFNKF2jBosZBU5eeHspaQWOmOElZsjICMQMC3aeHb GiShvZsx4wMYSjH8e7Vrhbu6irwCzVBApESjbUdpWWmEnhathWu1jo+s iFUiRAAxm9qyJNg/wOZqqzL/dL/q8PkcRU5oUKEpUge71M3ej2/7CPqp dVwuMoTvoB+ZOT4YeGyxMvHmbrxlFzGOHOijtzN+u1TQNatX2XBuzZNQ 1K+s2CXkPIZo7s6JgZyvaBevYtxPvYLw4z9mR7K2vaF18UYH9Z9GNUUe ayffKC73PYc=
+.			172800	IN	RRSIG	DNSKEY 8 0 172800 20260910000000 20260820000000 20326 . hQqYrSY1hgaqax9ke/8SFj0ZozkRgdHJJlXvIU5t2Bsrcmu3J87Wkgje MLeMiKK/TsFIlpb+XCl33T8C3Ja04IyZ2ifVGuMlrDAp7qg3lkO6gXmQ 9V7DQscPFbUmicFX0SyhR9wy3JxDQ/tVQx11sMlxphdhRx5kBobY2DeR G0SS2WODJi4qCFLk7bvQ0uRQ3adCI7MS8F6QX5NZEy7oHnmERYF1vosr JhTTw/lDOL6qx6k2LklIWnJI8gvAlhwqOWlQZk8hjkYkkrmgAW2s+pwG qeeYmz1Ttfs7yY2yreKEnJhdeg08q4NURPM1FrNeR5F4k38P3Es8vAIn 5r/xYw==
+
+
+;; ==== root-ds-for-com ====
+;; dig +dnssec +norec @a.root-servers.net com. DS
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 43191
+;; flags: qr aa; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 4096
+;; ANSWER SECTION:
+com.			86400	IN	DS	19718 13 2 8ACBB0CD28F41250A80A491389424D341522D946B0DA0C0291F2D3D7 71D7805A
+com.			86400	IN	RRSIG	DS 8 1 86400 20260904050000 20260822040000 57780 . I83E0UBkzPWJDbkWOzgMz0JG4yUFFPWBRCT4LJLsaCMEcmz5gH4xLEGp 8fmI6521dnI7uMfw4pYuPWNDRv2XlrQMyD7tjckfXJOg1bh6rYhEhJoa q17sQbjjEP/s8jblfz0ufMnpRheS7Z3HgdBOiBqaIwMxEms8ycTkxloK 0842xg5ULQpKfP3Uog3lfgQLgAdqFcpQ/oRKi3K87GKqlAcgOVnAi+0C jcxvYHJbX0Kt3jGR/lGIJ2ytViLlwQlfp6o5AIdolpXbCIK2UshOuN8n aW4NlnB4GACyk9+5CP13OqheEqaGEgQXOk+GR0U2JDydbYhGOnqvOR5F /f2mlA==
+
+
+;; ==== com-dnskey ====
+;; dig +dnssec +norec @a.gtld-servers.net com. DNSKEY
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 22825
+;; flags: qr aa; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 4096
+;; ANSWER SECTION:
+com.			86400	IN	DNSKEY	257 3 13 tx8EZRAd2+K/DJRV0S+hbBzaRPS/G6JVNBitHzqpsGlz8huE61Ms9ANe 6NSDLKJtiTBqfTJWDAywEp1FCsEINQ==
+com.			86400	IN	DNSKEY	256 3 13 o6onp+t66olg3PFhuIXaaatogT3OrqHrqt48IkYGuxwW8tSnQVMGyO+T Smp8sTRtkD9km+N/VQvvtqVM8ra9/Q==
+com.			86400	IN	RRSIG	DNSKEY 13 1 86400 20260830140235 20260815135735 19718 com. nD3eYn4yCuQC7tM6GiIonIj0w/F5TRXGsVAojL5y7GThN+Z6IERdKawj ev7UaztEceE0jRjx0scyfU749pv2lA==
+
+
+;; ==== com-ds-for-cloudflare ====
+;; dig +dnssec +norec @a.gtld-servers.net cloudflare.com. DS
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 29296
+;; flags: qr aa; QUERY: 1, ANSWER: 2, AUTHORITY: 14, ADDITIONAL: 27
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 4096
+;; ANSWER SECTION:
+cloudflare.com.		86400	IN	DS	2371 13 2 32996839A6D808AFE3EB4A795A0E6A7A39A76FC52FF228B22B76F6D6 3826F2B9
+cloudflare.com.		86400	IN	RRSIG	DS 13 2 86400 20260829010005 20260821235005 41446 com. sr3qt+aprcpI8fkzj4RtCOuFy+vepVE2BDnynxzoKp22Hwr919PjujaP rLAZFVfB8okVlCmXcpomaDpQag0IUA==
+
+;; AUTHORITY SECTION:
+com.			172800	IN	NS	f.gtld-servers.net.
+com.			172800	IN	NS	m.gtld-servers.net.
+com.			172800	IN	NS	l.gtld-servers.net.
+com.			172800	IN	NS	c.gtld-servers.net.
+com.			172800	IN	NS	j.gtld-servers.net.
+com.			172800	IN	NS	e.gtld-servers.net.
+com.			172800	IN	NS	h.gtld-servers.net.
+com.			172800	IN	NS	a.gtld-servers.net.
+com.			172800	IN	NS	i.gtld-servers.net.
+com.			172800	IN	NS	k.gtld-servers.net.
+com.			172800	IN	NS	b.gtld-servers.net.
+com.			172800	IN	NS	d.gtld-servers.net.
+com.			172800	IN	NS	g.gtld-servers.net.
+com.			172800	IN	RRSIG	NS 13 1 172800 20260827002612 20260819231612 41446 com. /+VsdAicdLS+xBPCijL7D/3qzsMxDfvyBd9JQFZ+IqWjRPsSfB3dIcuH hlvfBHKWTSZm5UIbm/OEysCXCCIeNA==
+
+
+;; ==== cloudflare-dnskey ====
+;; dig +dnssec +norec @ns3.cloudflare.com cloudflare.com. DNSKEY
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 34600
+;; flags: qr aa; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 1232
+;; ANSWER SECTION:
+cloudflare.com.		3600	IN	DNSKEY	257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+ KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==
+cloudflare.com.		3600	IN	DNSKEY	256 3 13 oJMRESz5E4gYzS/q6XDrvU1qMPYIjCWzJaOau8XNEZeqCYKD5ar0IRd8 KqXXFJkqmVfRvMGPmM1x8fGAa2XhSA==
+cloudflare.com.		3600	IN	RRSIG	DNSKEY 13 2 3600 20261002045535 20260802045535 2371 cloudflare.com. 14eL8GoAJFkezWYWQr6pcVSq55HRaaykMGstMqOW1bHXDb3Ll0gYj79p o1sBCvqUAFEYXZmIBVcYfSytQ63MPw==
+
+
+;; ==== cloudflare-a ====
+;; dig +dnssec +norec @ns3.cloudflare.com cloudflare.com. A
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 59940
+;; flags: qr aa; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 1232
+;; ANSWER SECTION:
+cloudflare.com.		300	IN	A	104.16.133.229
+cloudflare.com.		300	IN	A	104.16.132.229
+cloudflare.com.		300	IN	RRSIG	A 13 2 300 20260823121717 20260821101717 34505 cloudflare.com. CgLdpJCAZNfmmWprcEBWzFYh8x6rDXLLulNKiTRbBP/+iAlTpv25grQ9 st6In55N4S1Hsgcs1gqB7lnIMyEyAw==
+
+
+;; ==== cloudflare-nxdomain ====
+;; dig +dnssec +norec @ns3.cloudflare.com no-such-name-9x7q.cloudflare.com. A
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 30603
+;; flags: qr aa; QUERY: 1, ANSWER: 0, AUTHORITY: 4, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 1232
+;; AUTHORITY SECTION:
+cloudflare.com.		300	IN	SOA	ns3.cloudflare.com. dns.cloudflare.com. 2412182421 10000 2400 604800 300
+no-such-name-9x7q.cloudflare.com. 300 IN NSEC	\000.no-such-name-9x7q.cloudflare.com. RRSIG NSEC TYPE128
+cloudflare.com.		300	IN	RRSIG	SOA 13 2 300 20260823121717 20260821101717 34505 cloudflare.com. dNIo98iyvzwCR7wVkU+uabRfNFzLUiMiUKXd8NocyOn449DMJBj5n9MQ phLf9lbq4xqweuOMJa0RgodSAAGvwQ==
+no-such-name-9x7q.cloudflare.com. 300 IN RRSIG	NSEC 13 3 300 20260823121717 20260821101717 34505 cloudflare.com. 5wyeCXv6YFDvM6MFkimRBI1x14WBBtj3pbsBgQ0tPGD/AZtKYx+uQR4y ldxm1HlAtuq0/+jhYJJ9oYWzOjTS1A==
+
+
+;; ==== com-ds-for-google-none ====
+;; dig +dnssec +norec @a.gtld-servers.net google.com. DS
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 39517
+;; flags: qr aa; QUERY: 1, ANSWER: 0, AUTHORITY: 6, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags: do; udp: 4096
+;; AUTHORITY SECTION:
+CK0POJMG874LJREF7EFN8430QVIT8BSM.com. 900 IN NSEC3 1 1 0 - CK0Q35HRS4H76G6CHNB9414CJN6S5UPL  NS SOA RRSIG DNSKEY NSEC3PARAM
+CK0POJMG874LJREF7EFN8430QVIT8BSM.com. 900 IN RRSIG NSEC3 13 2 900 20260826110229 20260819095229 41446 com. wry7oYvwC46awTHolu87vHNXSh+TRVYn52HOejOMLeHTSwxh1AEcRBho 3q2PXVnKNNyQS4YKfKVAA37BedRuuQ==
+com.			900	IN	SOA	a.gtld-servers.net. nstld.verisign-grs.com. 1787397414 1800 900 604800 900
+com.			900	IN	RRSIG	SOA 13 1 900 20260829111654 20260822100654 41446 com. GkiYw8iBN7j+7Zc7zKTzld/1rfB3FEMfHwTQCbMvGNWPqmz0VSzElTbt bZP+wvJPf5+aXjzsCvphYtO1vC4B/g==
+S84BOR4DK28HNHPLC218O483VOOOD5D8.com. 900 IN NSEC3 1 1 0 - S84BR9CIB2A20L3ETR1M2415ENPP99L8  NS DS RRSIG
+S84BOR4DK28HNHPLC218O483VOOOD5D8.com. 900 IN RRSIG NSEC3 13 2 900 20260827012254 20260820001254 41446 com. Q2nAzVQgwvJE++Eu3GULwzi2OBcaI4Ljm38tpjTIu2tgM1nluGKlCw5/ +FxpDfXFMaM+OD/R1+4JyTPVKW20qA==
+

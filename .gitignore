@@ -1,0 +1,11 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.DS_Store
+*.local
+
+# Local working copy of the demo-authoring template. The tracked source of
+# truth is crypto-lab/audits/_MASTER-TEMPLATE.md; a committed copy here would
+# age silently and become a second, wrong standard.
+CRYPTO-LAB-TEMPLATE*.md
