@@ -542,7 +542,12 @@ body {
   margin-bottom: 0.35rem;
 }
 .cmp-label {
-  flex: 0 0 13rem;
+  /* `0 0` made this a hard 208px that could never shrink, so the compare rows
+     — the component that exists to put two digests side by side — set a 286px
+     floor on the document. `1 1` lets it give way; the row already wraps, so
+     the label simply takes its own line first. */
+  flex: 1 1 13rem;
+  min-width: 0;
   font-size: 0.76rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
