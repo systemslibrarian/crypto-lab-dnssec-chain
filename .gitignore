@@ -9,3 +9,4 @@ playwright-report/
 # truth is crypto-lab/audits/_MASTER-TEMPLATE.md; a committed copy here would
 # age silently and become a second, wrong standard.
 CRYPTO-LAB-TEMPLATE*.md
+chat.md
