@@ -12,6 +12,9 @@
  * "every state works" claim is watched rather than read.
  */
 
+import { validateChain } from '../../dnssec/chain.ts';
+import { buildRootRollover, ROOT_ROLLOVER_CAPTURE } from '../../vectors/root-rollover.ts';
+import { utcStamp } from '../format.ts';
 import { parseName, presentName } from '../../dns/name.ts';
 import { algorithmName, RR_TYPE } from '../../dns/types.ts';
 import { decodeRrsig } from '../../dns/rdata.ts';
@@ -172,13 +175,19 @@ export function renderRolloverPanel(host: HTMLElement): void {
       () => {
         current = spec;
         for (const other of buttons) other.setAttribute('aria-pressed', other === node ? 'true' : 'false');
-        void run();
+        void validateChain(buildRootRollover()).then((result) => {
+    rootOut.dataset.status = result.status;
+    rootOut.dataset.signer = String(result.links[0]?.vouchedKey?.tag ?? 'none');
+    replace(rootOut, renderChain(result, ROOT_ROLLOVER_CAPTURE.capturedAt));
+  });
+  void run();
       },
       { 'aria-pressed': spec.id === current.id ? 'true' : 'false' }
     );
     buttons.push(node);
   }
 
+  const rootOut = liveRegion('Real root rollover validation', 'root-rollover-out');
   const failureOut = liveRegion('Cached DS failure', 'rollover-failure-out');
 
   host.append(
@@ -188,6 +197,14 @@ export function renderRolloverPanel(host: HTMLElement): void {
       text:
         'Resolvers cache. At any moment, different resolvers hold different generations of the same zone — so a key change has to be arranged so that every generation still validates. Step through the stages and watch every one of them stay SECURE.',
     }),
+    el('h3', { text: 'The real root rollover: 11 October 2026' }),
+    el('p', { class: 'prose' }, [
+      el('a', { href: 'https://www.iana.org/dnssec/files', text: 'IANA’s rollover status' }),
+      ' confirms KSK-2024 (tag 38696) now signs the root DNSKEY set. KSK-2017 (20326) remains a valid trust anchor in post-publication; its revocation is scheduled for 11 January 2027 and removal for 22 March 2027. Follow resolver-vendor or RFC 5011 update guidance; do not delete it merely because it stopped signing.',
+    ]),
+    para(`This separate root-only capture was fetched via Google Public DNS on ${utcStamp(ROOT_ROLLOVER_CAPTURE.capturedAt)}. We verify the root’s signature ourselves against IANA anchors, at the capture instant. It does not replace the historical full chain in Build the chain, and the page makes no live DNS request.`),
+    rootOut,
+    el('h3', { text: 'Try a teaching-zone rollover' }),
     controlGroup('Rollover stage', ...buttons),
     output,
 
@@ -217,5 +234,10 @@ export function renderRolloverPanel(host: HTMLElement): void {
     )
   );
 
+  void validateChain(buildRootRollover()).then((result) => {
+    rootOut.dataset.status = result.status;
+    rootOut.dataset.signer = String(result.links[0]?.vouchedKey?.tag ?? 'none');
+    replace(rootOut, renderChain(result, ROOT_ROLLOVER_CAPTURE.capturedAt));
+  });
   void run();
 }

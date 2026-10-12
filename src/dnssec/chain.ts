@@ -221,6 +221,7 @@ async function validateLink(
 
   // ── The parent's half: either a DS, or a signed proof there is none ───────
   let vouchedKey: KeyInfo | null = null;
+  const trustedMatches: DsMatch[] = [];
   let dsVerification: RrsetVerification | null = null;
 
   if (isRoot) {
@@ -236,8 +237,8 @@ async function validateLink(
       const result = matchDs(anchor.rdata, evidence.zone, evidence.dnskeys.rdatas);
       dsMatches.push(result);
       if (result.matched) {
-        matched = result;
-        break;
+        matched ??= result;
+        trustedMatches.push(result);
       }
     }
     if (!matched || !matched.key) {
@@ -256,7 +257,7 @@ async function validateLink(
       pass(
         'anchor',
         'Trust anchor',
-        `a configured root anchor hashes to the root key tagged ${matched.key.tag} — this is the one key in the system that is not learned from the network`
+        `${trustedMatches.length} configured root anchor(s) match published keys — validation will try every trusted candidate`
       )
     );
   } else if (evidence.noDsProof) {
@@ -387,9 +388,9 @@ async function validateLink(
       dsMatches.push(result);
       if (!UNUSABLE.includes(result.failure)) unusableOnly = false;
       if (result.matched) {
-        matched = result;
+        matched ??= result;
+        trustedMatches.push(result);
         unusableOnly = false;
-        break;
       }
     }
     if (!matched || !matched.key) {
@@ -400,24 +401,7 @@ async function validateLink(
       if (unusableOnly) return stop(shown?.failure ?? 'DIGEST_UNSUPPORTED', 'INSECURE');
       return stop(shown?.failure ?? 'DS_MISMATCH', 'BOGUS');
     }
-    // The vouched key must be allowed to sign this zone's RRsets at all
-    // (RFC 4034 section 2.1.1). A DS pointing at a key with the Zone Key bit
-    // clear vouches for something that may not sign anything here.
-    if (!matched.key.isZoneKey) {
-      checks.push(
-        fail(
-          'ds-zone-flag',
-          'Vouched key is a zone key',
-          `the DS points at key ${matched.key.tag}, whose Zone Key flag (bit 7) is clear — it may not sign this zone's RRsets`,
-          'NOT_A_ZONE_KEY'
-        )
-      );
-      return stop('NOT_A_ZONE_KEY', 'BOGUS');
-    }
     vouchedKey = matched.key;
-    for (const check of matched.checks) {
-      checks.push({ ...check, label: `DS digest — ${check.label}` });
-    }
   }
 
   // ── The child's half: its DNSKEY RRset must verify under a vouched key ────
@@ -428,7 +412,7 @@ async function validateLink(
   const dnskeyVerification = await verifyRrset(
     evidence.dnskeys,
     evidence.dnskeyRrsigs,
-    evidence.dnskeys.rdatas,
+    trustedMatches.flatMap((match) => match.key ? [match.key.rdata] : []),
     { zone: evidence.zone, now: input.now }
   );
   const winning = dnskeyVerification.attempts.find((a) => a.verified) ?? dnskeyVerification.attempts[0];
@@ -436,6 +420,24 @@ async function validateLink(
     checks.push({ ...check, label: `DNSKEY self-signature — ${check.label}` });
   }
   if (!dnskeyVerification.verified) {
+    // A valid signature by an untrusted published key is useful diagnostic
+    // evidence only. It must never authenticate the DNSKEY set, even if its
+    // 16-bit tag collides with a trusted key's tag.
+    const diagnostic = await verifyRrset(
+      evidence.dnskeys, evidence.dnskeyRrsigs, evidence.dnskeys.rdatas,
+      { zone: evidence.zone, now: input.now }
+    );
+    const untrustedSigner = diagnostic.attempts.find((a) => a.verified)?.keyUsed;
+    if (untrustedSigner) {
+      checks.push(fail(
+        'binding', 'Vouched key signed the set',
+        trustedMatches.some((match) => match.key?.tag === untrustedSigner.tag)
+          ? `the DNSKEY RRset was signed by a DIFFERENT key that shares tag ${untrustedSigner.tag} with a trusted key — a tag is a checksum, so a collision proves nothing`
+          : `the DNSKEY RRset was signed by key ${untrustedSigner.tag}, which no usable anchor or parent DS vouched for`,
+        'KEYTAG_MISMATCH'
+      ));
+      return stop('KEYTAG_MISMATCH', 'BOGUS');
+    }
     return {
       title: evidence.title,
       zone: evidence.zone,
@@ -451,36 +453,17 @@ async function validateLink(
     };
   }
 
-  // The key that signed the DNSKEY RRset must be THE VERY KEY the parent
-  // vouched for -- compared as bytes, never by key tag.
-  //
-  // Comparing tags here would be a real vulnerability, not a stylistic point.
-  // A tag is a 16-bit checksum, so an attacker can grind roughly 2^16 keypairs
-  // until one collides with a zone's real KSK tag, persuade the zone to
-  // publish it alongside the real key, and sign the DNSKEY RRset with theirs.
-  // `verifyRrset` tries every key carrying the tag and stops at the one that
-  // verifies, so the key that VERIFIED would be the attacker's while the key
-  // the DS matched is the real one -- and a tag comparison would call that a
-  // match. RFC 4035 section 5.2 requires that "the corresponding private key
-  // has signed the child zone's apex DNSKEY RRset", which is a statement about
-  // the key, not about its index.
-  const signer = dnskeyVerification.attempts.find((a) => a.verified)?.keyUsed ?? null;
-  const sameKey =
-    signer !== null && vouchedKey !== null && compareBytes(signer.rdata, vouchedKey.rdata) === 0;
-  if (!sameKey) {
-    checks.push(
-      fail(
-        'binding',
-        'Vouched key signed the set',
-        signer && vouchedKey && signer.tag === vouchedKey.tag
-          ? `the DNSKEY RRset was signed by a DIFFERENT key that happens to share tag ${signer.tag} with the one the parent vouched for — a tag is a checksum, so a collision proves nothing`
-          : signer
-            ? `the DNSKEY RRset was signed by key ${signer.tag}, but the parent vouched for key ${vouchedKey?.tag}`
-            : 'no key could be identified as the signer of the DNSKEY RRset',
-        'KEYTAG_MISMATCH'
-      )
-    );
-    return stop('KEYTAG_MISMATCH', 'BOGUS');
+  // verifyRrset tried only the exact DNSKEY bytes vouched for by a
+  // usable anchor/DS. Pick the match that actually signed, not the first DS.
+  const signer = dnskeyVerification.attempts.find((a) => a.verified)!.keyUsed!;
+  const acceptedMatch = trustedMatches.find((match) =>
+    match.key !== null && compareBytes(match.key.rdata, signer.rdata) === 0
+  )!;
+  vouchedKey = signer;
+  if (!isRoot) {
+    for (const check of acceptedMatch.checks) {
+      checks.push({ ...check, label: `DS digest — ${check.label}` });
+    }
   }
   checks.push(
     pass(

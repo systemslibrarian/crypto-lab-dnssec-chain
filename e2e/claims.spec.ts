@@ -532,3 +532,14 @@ test('the page says what it is not', async ({ page }) => {
   // The private keys being public is stated, because it matters.
   await expect(scope).toContainText('private keys are published in the repository on purpose');
 });
+
+test('the separate dated root rollover validates with KSK-2024', async ({ page }) => {
+  await boot(page);
+  await openTab(page, 'Key rollover');
+  const root = page.locator('#root-rollover-out');
+  await expect(root).toHaveAttribute('data-status', 'SECURE');
+  await expect(root).toHaveAttribute('data-signer', '38696');
+  await expect(page.locator('#panel-rollover').getByRole('link', { name: 'IANA’s rollover status' }))
+    .toHaveAttribute('href', 'https://www.iana.org/dnssec/files');
+  await expect(page.locator('#panel-rollover')).toContainText('root-only capture');
+});

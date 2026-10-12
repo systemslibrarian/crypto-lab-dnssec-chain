@@ -125,7 +125,7 @@ export function renderChainPanel(host: HTMLElement): void {
     ]),
     el('p', { class: 'prose' }, [
       badge('info', 'note'),
-      ` ${ANCHORS.length} anchors are configured. The chain below only needs one of them to match a key the root actually served.`,
+      ` ${ANCHORS.length} anchors are configured. The chain below needs a valid DNSKEY signature by any one of their matching keys; anchor order does not decide trust.`,
     ]),
 
     controlGroup(

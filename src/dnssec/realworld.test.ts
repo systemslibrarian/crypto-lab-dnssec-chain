@@ -14,6 +14,7 @@ import { toHex } from '../dns/codec.ts';
 import { parseName, presentName } from '../dns/name.ts';
 import { RR_TYPE } from '../dns/types.ts';
 import { PINNED_CHAIN, PINNED_ZONES, section } from '../vectors/pinned.ts';
+import { buildRootRollover } from '../vectors/root-rollover.ts';
 import { ROOT_TRUST_ANCHORS } from '../vectors/rfc.ts';
 import { dsPreimage } from './canonical.ts';
 import { validateChain } from './chain.ts';
@@ -257,4 +258,22 @@ describe('every anchor is usable', () => {
       expect(anchor.rdata.length).toBeGreaterThan(4);
     }
   });
+});
+
+
+describe('real root signatures across the October 2026 rollover', () => {
+  for (const [label, build, tag] of [
+    ['historical full chain', buildSecureChain, 20326],
+    ['post-rollover root-only capture', buildRootRollover, 38696],
+  ] as const) {
+    for (const reverse of [false, true]) {
+      it(`${label} validates with anchors ${reverse ? 'reversed' : 'in original order'}`, async () => {
+        const input = build();
+        const result = await validateChain({ ...input, anchors: reverse ? [...input.anchors].reverse() : input.anchors });
+        expect(result.status).toBe('SECURE');
+        expect(result.links[0]?.vouchedKey?.tag).toBe(tag);
+        expect(result.links[0]?.dsMatches.filter((match) => match.matched)).toHaveLength(2);
+      });
+    }
+  }
 });
