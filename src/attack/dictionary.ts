@@ -8,12 +8,12 @@
  * keep the hits.
  *
  * RFC 5155 says this plainly in section 12.1.1 ("Dictionary Attacks"), and RFC
- * 9276 (BCP 236) is sharper about what the parameters do and do not buy: an
- * adversary "will likely be able to find most of the 'guessable' names despite
- * any level of additional hashing iterations", and because a name is already
- * implicitly salted by being fully qualified, the salt field is "functionally
- * useless" unless it changes mid-attack, which rebuilding the whole chain
- * makes impractical.
+ * 9276 (BCP 236) is sharper about what the parameters do and do not buy: of an
+ * adversary willing to expend significant CPU resources it says "they'll likely
+ * be able to find most of the 'guessable' names despite any level of additional
+ * hashing iterations", and because a name is already implicitly salted by being
+ * fully qualified, the salt field is "functionally useless" unless it changes
+ * mid-attack, which rebuilding the whole chain makes impractical.
  *
  * So this runs the same attack twice against the same construction, and
  * REPORTS A RECOVERY RATE rather than a verdict. The variable is not the

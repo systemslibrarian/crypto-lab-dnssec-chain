@@ -302,6 +302,16 @@ test('the recovery rate, the chips and the hash count all agree', async ({ page 
     .allTextContents();
   expect(survivors.length).toBeGreaterThan(0);
   for (const survivor of survivors) expect(survivor).toMatch(/\.demo\.example\.$/);
+
+  // The two quotations under the finding must be the sources' own words. RFC
+  // 9276 section 2 reads "they'll likely be able to find most of the
+  // 'guessable' names"; the page quoted it as "will likely" until 15 November
+  // 2026.
+  const out = page.locator('#nsec3-out');
+  await expect(out).toContainText('are still susceptible to dictionary attacks');
+  await expect(out).toContainText(
+    'they’ll likely be able to find most of the ‘guessable’ names despite any level of additional hashing iterations'
+  );
 });
 
 test('adding 150 iterations changes the cost and not the recovered set', async ({ page }) => {
@@ -493,6 +503,36 @@ test('every rollover stage stays SECURE, and the key counts are what the stage m
     .click();
   await settled(page, '#rollover-failure-out', 'data-status');
   await expect(page.locator('#rollover-failure-out')).toHaveAttribute('data-status', 'BOGUS');
+});
+
+test('the rollover panel cites the right RFC section and does not call the demo zone legal', async ({
+  page,
+}) => {
+  await boot(page);
+  await openTab(page, 'Key rollover');
+  await settled(page, '#rollover-out', 'data-stage');
+  const panel = page.locator('#panel-rollover');
+
+  // The DS waiting rule belongs to RFC 6781 section 4.1.2 (Key Signing Key
+  // Rollovers); 4.1.1.1 and 4.1.1.2 are the two ZSK schemes the stage buttons
+  // above demonstrate, which is a different rule. The callout that states the
+  // waiting rule is rendered by the cached-DS failure.
+  await panel.getByRole('button', { name: 'A cached DS outlives its key' }).click();
+  await settled(page, '#rollover-failure-out', 'data-status');
+  const failure = page.locator('#rollover-failure-out');
+  await expect(failure).toContainText('never remove a key until every DS');
+  await expect(failure).toContainText('RFC 6781 section 4.1.2');
+  await expect(failure).not.toContainText('4.1.1.1');
+
+  // The mixed-algorithm demo zone breaks RFC 4035 section 2.2 / RFC 6840
+  // section 5.11 and validates only because validators accept any one valid
+  // path. The panel used to call it "legal and occasionally done".
+  await panel.locator('.disclose-summary', { hasText: 'two keys in the first place' }).click();
+  await expect(panel).toContainText('That is not a legal zone');
+  await expect(panel).toContainText('RFC 4035 section 2.2');
+  await expect(panel).toContainText('RFC 6840 section 5.11');
+  await expect(panel).toContainText('SHOULD accept any single valid path');
+  await expect(panel).not.toContainText('legal and occasionally done');
 });
 
 // ── The online-denial panel says what it costs ─────────────────────────────

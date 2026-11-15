@@ -59,6 +59,37 @@ describe('a zone signed in the page', () => {
     expect(resolution.result.answer?.verification.attempts[0]?.keyUsed?.algorithm).toBe(13);
   });
 
+  it('breaks the mandatory-algorithm rule, and this is what that looks like', async () => {
+    // RFC 4035 section 2.2: "There MUST be an RRSIG for each RRset using at
+    // least one DNSKEY of each algorithm in the zone apex DNSKEY RRset." RFC
+    // 6840 section 5.11 restates it. The demo zone publishes an algorithm-15
+    // KSK and an algorithm-13 ZSK and signs ordinary RRsets with the ZSK only,
+    // so NEITHER algorithm covers the whole zone. That is deliberate -- it is
+    // what lets one demo chain exercise both algorithms -- and the rollover
+    // panel says outright that the zone is not legal and why it validates
+    // anyway (validators "SHOULD accept any single valid path").
+    //
+    // This test exists so the page's prose cannot drift away from the zone: if
+    // signZone ever signs with both algorithms, this fails and the sentence
+    // calling the zone non-compliant has to be rewritten.
+    const zone = await buildDemoZone();
+    const algorithms = (rdatas: readonly Uint8Array[]): number[] =>
+      rdatas.map((rdata) => decodeRrsig(rdata).algorithm);
+
+    // Byte 3 of DNSKEY RDATA is the algorithm: flags(2) protocol(1) alg(1).
+    const published = zone.dnskey.rrset.rdatas.map((rdata) => rdata[3]!);
+    expect(new Set(published)).toEqual(new Set([13, 15]));
+
+    // The DNSKEY RRset is signed by the KSK alone: algorithm 15, never 13.
+    expect(new Set(algorithms(zone.dnskey.rrsigs))).toEqual(new Set([15]));
+
+    // Every other RRset is signed by the ZSK alone: algorithm 13, never 15.
+    for (const [k, signed] of zone.signed) {
+      if (signed.rrset.type === RR_TYPE.DNSKEY) continue;
+      expect(new Set(algorithms(signed.rrsigs)), k).toEqual(new Set([13]));
+    }
+  });
+
   it('re-verifies every RRset it signed, cryptographically', async () => {
     // Not "an RRSIG exists" -- that would pass against a signer that emitted
     // 64 zero octets. Every signed RRset in the zone, including the NSEC

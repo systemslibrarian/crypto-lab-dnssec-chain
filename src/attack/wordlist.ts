@@ -3,8 +3,9 @@
  *
  * This is a small, ordinary list of the names that turn up in almost every
  * zone — the kind of list anyone can assemble in an afternoon, and exactly
- * what RFC 9276 has in mind when it says an adversary "will likely be able to
- * find most of the 'guessable' names despite any level of additional hashing
+ * what RFC 9276 has in mind: if an adversary really wants to expend significant
+ * CPU resources on an offline dictionary attack, "they'll likely be able to find
+ * most of the 'guessable' names despite any level of additional hashing
  * iterations". Nothing here is exotic and nothing is derived from the target
  * zone; that is the point.
  *

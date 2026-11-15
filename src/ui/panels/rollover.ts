@@ -134,7 +134,7 @@ async function renderCachedDs(): Promise<HTMLElement> {
         'The DS lives at the parent, which usually means a registrar’s web form and a TTL measured in days. A zone operator can roll a zone-signing key alone, on their own schedule — that is what the two shapes above are for. Rolling the KEY-SIGNING key means a change at the parent, and the window between "the child stopped using the old key" and "every cache has dropped the old DS" is exactly how long the domain is dark.',
       ]),
       el('p', {}, [
-        'The rule that follows: never remove a key until every DS pointing at it has aged out of every cache. RFC 6781 sections 4.1.1.1 and 4.1.1.2 exist to make that waiting period safe rather than optional.',
+        'The rule that follows: never remove a key until every DS pointing at it has aged out of every cache. RFC 6781 section 4.1.2 is where that waiting period is written down — the child publishes the new KSK, waits for the parent to publish the new DS, and then waits at least the DS TTL again before the old key can go.',
       ]),
     ]),
   ]);
@@ -229,7 +229,7 @@ export function renderRolloverPanel(host: HTMLElement): void {
       ),
       el('p', { class: 'prose' }, [
         badge('info', 'in this lab'),
-        ' the child zone’s key-signing key is Ed25519 (algorithm 15) and its zone-signing key is ECDSA P-256 (algorithm 13), which is legal and occasionally done — the DS points at one algorithm, the answers are signed with another, and a validator has to handle both.',
+        ' the child zone’s key-signing key is Ed25519 (algorithm 15) and its zone-signing key is ECDSA P-256 (algorithm 13), so the DS points at one algorithm and the answers are signed with another. That is not a legal zone. RFC 4035 section 2.2 requires an RRSIG for each RRset made with at least one key of every algorithm in the apex DNSKEY RRset, and RFC 6840 section 5.11 restates it: the zone "MUST also be signed with each algorithm (though not each key) present in the DNSKEY RRset". Here only the DNSKEY RRset carries an algorithm-15 signature and only the other RRsets carry algorithm-13 ones, so neither algorithm covers the whole zone. It validates anyway because that requirement "applies to servers, not validators", and validators "SHOULD accept any single valid path" — which is the point worth taking away: a zone can break the signing rule and still resolve, so resolving is not evidence that the rule was kept.',
       ])
     )
   );

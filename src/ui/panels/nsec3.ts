@@ -196,7 +196,7 @@ export function renderNsec3Panel(host: HTMLElement): void {
         `The names that survived are ${missed.length === 0 ? 'none' : missed.map((m) => m.split('.')[0]).join(', ')} — the site-specific ones. Predictability decided the outcome; the hash parameters did not.`,
       ]),
       el('p', {}, [
-        'RFC 5155 section 12.1.1 names this exactly: NSEC3 records "are still susceptible to dictionary attacks". RFC 9276 adds that an adversary willing to run one "will likely be able to find most of the ‘guessable’ names despite any level of additional hashing iterations".',
+        'RFC 5155 section 12.1.1 names this exactly: NSEC3 records "are still susceptible to dictionary attacks". RFC 9276 adds that if an adversary really wants to expend significant CPU resources on one, "they’ll likely be able to find most of the ‘guessable’ names despite any level of additional hashing iterations".',
       ]),
     ]);
   };

@@ -163,6 +163,19 @@ export async function demoKeys(): Promise<DemoKeys> {
     // The child's KSK is Ed25519 (algorithm 15) and its ZSK is ECDSA P-256
     // (algorithm 13), so the demo chain exercises both of the algorithms this
     // brief names, in the roles a zone actually uses them in.
+    //
+    // This makes `demo.example.` a zone that BREAKS the mandatory-algorithm
+    // rule, deliberately and visibly. RFC 4035 section 2.2 requires an RRSIG
+    // for each RRset made with at least one key of every algorithm in the apex
+    // DNSKEY RRset, and RFC 6840 section 5.11 restates it as "the zone MUST
+    // also be signed with each algorithm (though not each key) present in the
+    // DNSKEY RRset". `signZone` signs ordinary RRsets with the ZSKs only and
+    // the DNSKEY RRset with the KSK only, so neither algorithm covers the whole
+    // zone. It still validates because RFC 6840 section 5.11 says that
+    // requirement "applies to servers, not validators" and that validators
+    // "SHOULD accept any single valid path". The rollover panel says so on
+    // screen, and `demo.test.ts` pins the shape so the prose cannot drift away
+    // from the zone.
     zoneKsk: ed(DEMO_ED_SEEDS.zoneKsk, true),
     zoneZsk: await ec(DEMO_EC_KEYS.zoneZsk, false),
     zoneZskNext: await ec(DEMO_EC_KEYS.zoneZskNext, false),
