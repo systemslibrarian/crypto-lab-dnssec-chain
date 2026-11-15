@@ -17,8 +17,14 @@
  * specifies minimally covering NSEC records and on-line signing, and defines
  * the increment used below. RFC 7129 (Informational, Independent Submission)
  * is the readable overview and its Appendix B is where "NSEC3 white lies" is
- * named. "Black lies" — the NODATA variant the capture shows — has no RFC; it
- * is an Internet-Draft, draft-valsorda-dnsop-black-lies.
+ * named. "Black lies" — the NODATA variant the capture shows — was for years
+ * only an Internet-Draft, draft-valsorda-dnsop-black-lies; since September
+ * 2025 it is RFC 9824, "Compact Denial of Existence in DNSSEC" (Proposed
+ * Standard, updates RFC 4034 and 4035), whose Acknowledgements credit that
+ * draft. RFC 9824 also registers the NXNAME pseudo-type (128), set in the
+ * NSEC type bitmap of a denial for a nonexistent name so a tool can tell it
+ * from an empty non-terminal, whose bitmap is otherwise identical. Checked
+ * 15 November 2026 against https://www.rfc-editor.org/info/rfc9824.
  */
 
 import { presentName } from '../../dns/name.ts';
@@ -184,14 +190,14 @@ export function renderOnlinePanel(host: HTMLElement): void {
             }),
           ]),
         ]),
-        el('li', { class: 'check check-bad', role: 'listitem' }, [
-          el('span', { class: 'check-glyph', 'aria-hidden': 'true', text: '✗' }),
+        el('li', { class: 'check check-ok', role: 'listitem' }, [
+          el('span', { class: 'check-glyph', 'aria-hidden': 'true', text: '✓' }),
           el('div', { class: 'check-body' }, [
-            el('span', { class: 'check-label', text: '"Black lies" has no RFC' }),
+            el('span', { class: 'check-label', text: 'RFC 9824 — Proposed Standard' }),
             el('span', {
               class: 'check-detail',
               text:
-                'The NODATA variant shown above is specified only in an Internet-Draft, draft-valsorda-dnsop-black-lies. RFC 4470 is the published anchor for minimally covering NSEC; RFC 7129 Appendix B is the published anchor for white lies.',
+                'Compact Denial of Existence in DNSSEC (September 2025; updates RFC 4034 and 4035). The NODATA variant shown above — "black lies" — was for years only an Internet-Draft, draft-valsorda-dnsop-black-lies, which the RFC credits in its Acknowledgements. It also registers the NXNAME pseudo-type (128), set in the NSEC type bitmap of a denial for a nonexistent name so a tool can tell it from an empty non-terminal, whose bitmap is otherwise identical. RFC 4470 remains the anchor for the minimally covering NSEC it builds on; RFC 7129 Appendix B for white lies.',
             }),
           ]),
         ]),

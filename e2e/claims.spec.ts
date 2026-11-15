@@ -512,7 +512,12 @@ test('the synthesized denial is shown as a trade, with its citations checked', a
   // The citation that is commonly wrong is named as wrong rather than repeated.
   await page.locator('#panel-online .disclose-summary', { hasText: 'Citations' }).click();
   await expect(page.locator('#panel-online .check-bad', { hasText: 'RFC 8901' })).toHaveCount(1);
-  await expect(page.locator('#panel-online .check-bad', { hasText: 'has no RFC' })).toHaveCount(1);
+  // "Black lies" has had an RFC since September 2025: RFC 9824. The page must
+  // cite it as a reference, and must no longer say the technique has none.
+  await expect(
+    page.locator('#panel-online .check-ok .check-label', { hasText: 'RFC 9824 — Proposed Standard' })
+  ).toHaveCount(1);
+  await expect(page.locator('#panel-online')).not.toContainText('has no RFC');
   // Matched on the label, not on the row text: RFC 7129's entry mentions RFC
   // 4470 in its own description.
   await expect(
